@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field, HttpUrl
+from datetime import datetime, timezone
 from typing import Any
-from datetime import datetime
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class CrawlConfig(BaseModel):
@@ -27,6 +29,16 @@ class CrawlRequest(BaseModel):
     priority: int = Field(default=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("URL must use http or https scheme")
+        if not parsed.netloc:
+            raise ValueError("URL must have a valid host")
+        return v
+
     def __lt__(self, other: "CrawlRequest") -> bool:
         return self.priority > other.priority
 
@@ -38,7 +50,7 @@ class CrawlResponse(BaseModel):
     status_code: int
     content: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
-    fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error: str | None = None
     request: CrawlRequest
 
@@ -51,4 +63,4 @@ class ParsedItem(BaseModel):
     text: str | None = None
     links: list[str] = Field(default_factory=list)
     extracted_data: dict[str, Any] = Field(default_factory=dict)
-    crawled_at: datetime = Field(default_factory=datetime.utcnow)
+    crawled_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

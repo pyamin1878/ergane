@@ -44,11 +44,16 @@ class Fetcher:
         self._robots_lock = asyncio.Lock()
 
     async def __aenter__(self) -> "Fetcher":
+        limits = httpx.Limits(
+            max_connections=100,
+            max_keepalive_connections=50,
+        )
         self._client = httpx.AsyncClient(
             http2=True,
             timeout=httpx.Timeout(self.config.request_timeout),
             follow_redirects=True,
             headers={"User-Agent": self.config.user_agent},
+            limits=limits,
         )
         return self
 
@@ -82,8 +87,8 @@ class Fetcher:
                 async with self._robots_lock:
                     self._robots_cache[robots_url] = rp
                 return rp
-        except Exception:
-            pass
+        except (httpx.HTTPError, httpx.TimeoutException):
+            pass  # robots.txt fetch failed, allow crawl
 
         async with self._robots_lock:
             self._robots_cache[robots_url] = None

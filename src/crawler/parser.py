@@ -1,33 +1,29 @@
-from urllib.parse import urljoin, urlparse
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 from selectolax.parser import HTMLParser
 
 from src.models import CrawlResponse, ParsedItem
 
 
-def extract_text(html: str) -> str:
-    """Extract visible text content from HTML."""
-    tree = HTMLParser(html)
-
+def _extract_text_from_tree(tree: HTMLParser) -> str:
+    """Extract visible text content from parsed HTML tree."""
     for tag in tree.css("script, style, noscript"):
         tag.decompose()
 
     return tree.text(separator=" ", strip=True)
 
 
-def extract_title(html: str) -> str | None:
-    """Extract the page title."""
-    tree = HTMLParser(html)
+def _extract_title_from_tree(tree: HTMLParser) -> str | None:
+    """Extract the page title from parsed HTML tree."""
     title_node = tree.css_first("title")
     if title_node:
         return title_node.text(strip=True)
     return None
 
 
-def extract_links(html: str, base_url: str) -> list[str]:
-    """Extract and normalize all links from HTML."""
-    tree = HTMLParser(html)
+def _extract_links_from_tree(tree: HTMLParser, base_url: str) -> list[str]:
+    """Extract and normalize all links from parsed HTML tree."""
     links: list[str] = []
 
     for anchor in tree.css("a[href]"):
@@ -36,7 +32,7 @@ def extract_links(html: str, base_url: str) -> list[str]:
             continue
 
         href = href.strip()
-        if href.startswith(("#", "javascript:", "mailto:", "tel:")):
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
             continue
 
         absolute_url = urljoin(base_url, href)
@@ -51,17 +47,18 @@ def extract_links(html: str, base_url: str) -> list[str]:
     return list(dict.fromkeys(links))
 
 
-def extract_by_selector(html: str, selectors: dict[str, str]) -> dict[str, Any]:
-    """Extract data using CSS selectors.
+def _extract_by_selector_from_tree(
+    tree: HTMLParser, selectors: dict[str, str]
+) -> dict[str, Any]:
+    """Extract data using CSS selectors from parsed HTML tree.
 
     Args:
-        html: HTML content
+        tree: Parsed HTML tree
         selectors: Mapping of field names to CSS selectors
 
     Returns:
         Extracted data for each selector
     """
-    tree = HTMLParser(html)
     result: dict[str, Any] = {}
 
     for field, selector in selectors.items():
@@ -74,6 +71,39 @@ def extract_by_selector(html: str, selectors: dict[str, str]) -> dict[str, Any]:
             result[field] = [n.text(strip=True) for n in nodes]
 
     return result
+
+
+# Public API functions that maintain backwards compatibility
+def extract_text(html: str) -> str:
+    """Extract visible text content from HTML."""
+    tree = HTMLParser(html)
+    return _extract_text_from_tree(tree)
+
+
+def extract_title(html: str) -> str | None:
+    """Extract the page title."""
+    tree = HTMLParser(html)
+    return _extract_title_from_tree(tree)
+
+
+def extract_links(html: str, base_url: str) -> list[str]:
+    """Extract and normalize all links from HTML."""
+    tree = HTMLParser(html)
+    return _extract_links_from_tree(tree, base_url)
+
+
+def extract_by_selector(html: str, selectors: dict[str, str]) -> dict[str, Any]:
+    """Extract data using CSS selectors.
+
+    Args:
+        html: HTML content
+        selectors: Mapping of field names to CSS selectors
+
+    Returns:
+        Extracted data for each selector
+    """
+    tree = HTMLParser(html)
+    return _extract_by_selector_from_tree(tree, selectors)
 
 
 def extract_data(
@@ -95,13 +125,22 @@ def extract_data(
             extracted_data={"error": response.error or "No content"},
         )
 
-    title = extract_title(response.content)
-    text = extract_text(response.content)
-    links = extract_links(response.content, response.url)
+    # Parse HTML once and reuse tree for all extractions
+    tree = HTMLParser(response.content)
 
+    # Extract title before decomposing script/style tags
+    title = _extract_title_from_tree(tree)
+
+    # Extract links before decomposing tags
+    links = _extract_links_from_tree(tree, response.url)
+
+    # Extract custom selectors before decomposing tags
     extracted = {}
     if selectors:
-        extracted = extract_by_selector(response.content, selectors)
+        extracted = _extract_by_selector_from_tree(tree, selectors)
+
+    # Extract text (this decomposes script/style tags, so do last)
+    text = _extract_text_from_tree(tree)
 
     return ParsedItem(
         url=response.url,

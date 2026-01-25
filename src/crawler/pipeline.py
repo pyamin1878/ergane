@@ -8,7 +8,12 @@ from src.models import CrawlConfig, ParsedItem
 
 
 class Pipeline:
-    """Data output pipeline with batched parquet writes."""
+    """Data output pipeline with batched parquet writes.
+
+    Uses incremental batch files to avoid O(n²) read-concat-rewrite pattern.
+    Output files are named: base_000001.parquet, base_000002.parquet, etc.
+    Call consolidate() after crawl to merge into single file if desired.
+    """
 
     def __init__(self, config: CrawlConfig, output_path: str | Path):
         self.config = config
@@ -16,6 +21,17 @@ class Pipeline:
         self._buffer: list[ParsedItem] = []
         self._lock = asyncio.Lock()
         self._total_written = 0
+        self._batch_number = 0
+
+        # Create output directory if it doesn't exist
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _get_batch_path(self) -> Path:
+        """Generate path for next batch file."""
+        stem = self.output_path.stem
+        suffix = self.output_path.suffix or ".parquet"
+        parent = self.output_path.parent
+        return parent / f"{stem}_{self._batch_number:06d}{suffix}"
 
     async def add(self, item: ParsedItem) -> None:
         """Add an item to the buffer, flushing if batch size reached."""
@@ -32,7 +48,7 @@ class Pipeline:
                 await self._flush_unlocked()
 
     async def _flush_unlocked(self) -> None:
-        """Write buffer to parquet (must hold lock)."""
+        """Write buffer to parquet batch file (must hold lock)."""
         if not self._buffer:
             return
 
@@ -53,11 +69,10 @@ class Pipeline:
 
         df = pl.DataFrame(records)
 
-        if self.output_path.exists():
-            existing = pl.read_parquet(self.output_path)
-            df = pl.concat([existing, df])
-
-        df.write_parquet(self.output_path)
+        # Write to numbered batch file (O(1) per batch instead of O(n))
+        batch_path = self._get_batch_path()
+        df.write_parquet(batch_path)
+        self._batch_number += 1
         self._total_written += len(batch)
 
     async def flush(self) -> None:
@@ -65,30 +80,43 @@ class Pipeline:
         async with self._lock:
             while self._buffer:
                 await self._flush_unlocked()
-            if self._buffer:
-                batch = self._buffer
-                self._buffer = []
 
-                records = [
-                    {
-                        "url": item.url,
-                        "title": item.title,
-                        "text": item.text[:10000] if item.text else None,
-                        "links": json.dumps(item.links),
-                        "extracted_data": json.dumps(item.extracted_data),
-                        "crawled_at": item.crawled_at.isoformat(),
-                    }
-                    for item in batch
-                ]
+    def consolidate(self) -> Path:
+        """Merge all batch files into a single output file.
 
-                df = pl.DataFrame(records)
+        Call this after crawl completes if you want a single file.
+        Returns the path to the consolidated file.
+        """
+        stem = self.output_path.stem
+        parent = self.output_path.parent
 
-                if self.output_path.exists():
-                    existing = pl.read_parquet(self.output_path)
-                    df = pl.concat([existing, df])
+        # Find all batch files
+        batch_files = sorted(parent.glob(f"{stem}_*.parquet"))
 
-                df.write_parquet(self.output_path)
-                self._total_written += len(batch)
+        if not batch_files:
+            return self.output_path
+
+        if len(batch_files) == 1:
+            # Just rename the single batch file
+            batch_files[0].rename(self.output_path)
+            return self.output_path
+
+        # Read and concatenate all batch files
+        dfs = [pl.read_parquet(f) for f in batch_files]
+        combined = pl.concat(dfs)
+        combined.write_parquet(self.output_path)
+
+        # Clean up batch files
+        for f in batch_files:
+            f.unlink()
+
+        return self.output_path
+
+    def get_batch_files(self) -> list[Path]:
+        """Return list of all batch files created."""
+        stem = self.output_path.stem
+        parent = self.output_path.parent
+        return sorted(parent.glob(f"{stem}_*.parquet"))
 
     @property
     def total_written(self) -> int:

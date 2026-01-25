@@ -1,12 +1,11 @@
 import asyncio
 import signal
-import sys
 from urllib.parse import urlparse
 
 import click
 
+from src.crawler import Fetcher, Pipeline, Scheduler, extract_data
 from src.models import CrawlConfig, CrawlRequest
-from src.crawler import Fetcher, Scheduler, Pipeline, extract_data, extract_links
 
 
 class Crawler:
@@ -32,6 +31,7 @@ class Crawler:
         self._shutdown = asyncio.Event()
         self._pages_crawled = 0
         self._active_tasks = 0
+        self._counter_lock = asyncio.Lock()
 
     def _get_domain(self, url: str) -> str:
         return urlparse(url).netloc
@@ -44,18 +44,22 @@ class Crawler:
     ) -> None:
         """Worker that fetches, parses, and queues new URLs."""
         while not self._shutdown.is_set():
-            if self._pages_crawled >= self.max_pages:
-                break
+            async with self._counter_lock:
+                if self._pages_crawled >= self.max_pages:
+                    break
 
             request = await scheduler.get_nowait()
             if request is None:
                 await asyncio.sleep(0.1)
                 continue
 
-            self._active_tasks += 1
+            async with self._counter_lock:
+                self._active_tasks += 1
             try:
                 response = await fetcher.fetch(request)
-                self._pages_crawled += 1
+                async with self._counter_lock:
+                    self._pages_crawled += 1
+                    current_count = self._pages_crawled
 
                 if response.status_code == 200 and response.content:
                     item = extract_data(response)
@@ -78,12 +82,13 @@ class Crawler:
                         await scheduler.add_many(new_requests)
 
                 click.echo(
-                    f"[{self._pages_crawled}/{self.max_pages}] "
+                    f"[{current_count}/{self.max_pages}] "
                     f"{response.status_code} {request.url[:80]}"
                 )
 
             finally:
-                self._active_tasks -= 1
+                async with self._counter_lock:
+                    self._active_tasks -= 1
 
     async def run(self) -> None:
         """Run the crawler."""
@@ -104,10 +109,12 @@ class Crawler:
 
             try:
                 while not self._shutdown.is_set():
-                    if self._pages_crawled >= self.max_pages:
-                        break
+                    async with self._counter_lock:
+                        if self._pages_crawled >= self.max_pages:
+                            break
+                        active = self._active_tasks
 
-                    if await scheduler.is_empty() and self._active_tasks == 0:
+                    if await scheduler.is_empty() and active == 0:
                         break
 
                     await asyncio.sleep(0.5)
@@ -119,6 +126,7 @@ class Crawler:
 
                 await asyncio.gather(*workers, return_exceptions=True)
                 await pipeline.flush()
+                pipeline.consolidate()
 
         click.echo(f"\nCrawl complete: {self._pages_crawled} pages")
         click.echo(f"Output saved to: {self.output_path}")
