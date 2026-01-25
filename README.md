@@ -1,6 +1,12 @@
-# Arachne
+# Ergane
+
+[![PyPI version](https://badge.fury.io/py/ergane.svg)](https://badge.fury.io/py/ergane)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 High-performance async web scraper with HTTP/2 support, built with Python.
+
+*Named after Ergane, Athena's title as goddess of crafts and weaving in Greek mythology.*
 
 ## Features
 
@@ -16,20 +22,26 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 ## Installation
 
 ```bash
-pip install -e .
+pip install ergane
+```
+
+For development:
+
+```bash
+pip install ergane[dev]
 ```
 
 ## Quick Start
 
 ```bash
 # Crawl a single site
-arachne -u https://example.com -n 100
+ergane -u https://example.com -n 100
 
 # Crawl multiple start URLs
-arachne -u https://site1.com -u https://site2.com -n 500
+ergane -u https://site1.com -u https://site2.com -n 500
 
 # Custom output and settings
-arachne -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
+ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 ```
 
 ## CLI Options
@@ -71,7 +83,7 @@ print(df.head())
 
 ## Benchmarks
 
-Arachne uses selectolax for HTML parsing, which is significantly faster than BeautifulSoup:
+Ergane uses selectolax for HTML parsing, which is significantly faster than BeautifulSoup:
 
 | Operation         | Selectolax | BS4 + lxml | Speedup |
 |-------------------|------------|------------|---------|

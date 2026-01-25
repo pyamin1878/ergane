@@ -153,7 +153,7 @@ def main(
     same_domain: bool,
     ignore_robots: bool,
 ) -> None:
-    """Arachne - High-performance async web scraper."""
+    """Ergane - High-performance async web scraper."""
     config = CrawlConfig(
         max_requests_per_second=rate_limit,
         max_concurrent_requests=concurrency,

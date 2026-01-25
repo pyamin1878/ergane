@@ -1,14 +1,15 @@
 """Tests for the data output pipeline."""
-import pytest
+
 import asyncio
 import json
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 import polars as pl
+import pytest
 
-from src.models import CrawlConfig, ParsedItem
 from src.crawler import Pipeline
+from src.models import CrawlConfig, ParsedItem
 
 
 @pytest.fixture
@@ -99,9 +100,7 @@ class TestBatchWriting:
         assert pipeline.total_written == 7
 
     @pytest.mark.asyncio
-    async def test_multiple_batches(
-        self, config: CrawlConfig, temp_parquet_path: Path
-    ):
+    async def test_multiple_batches(self, config: CrawlConfig, temp_parquet_path: Path):
         """Test writing multiple batches."""
         config.batch_size = 5
         pipeline = Pipeline(config, temp_parquet_path)
@@ -147,9 +146,7 @@ class TestParquetOutput:
     """Parquet file output tests."""
 
     @pytest.mark.asyncio
-    async def test_parquet_schema(
-        self, config: CrawlConfig, temp_parquet_path: Path
-    ):
+    async def test_parquet_schema(self, config: CrawlConfig, temp_parquet_path: Path):
         """Test that parquet has expected schema."""
         config.batch_size = 5
         pipeline = Pipeline(config, temp_parquet_path)
@@ -193,9 +190,7 @@ class TestParquetOutput:
         assert json.loads(df[0, "extracted_data"]) == {"custom": "data"}
 
     @pytest.mark.asyncio
-    async def test_text_truncation(
-        self, config: CrawlConfig, temp_parquet_path: Path
-    ):
+    async def test_text_truncation(self, config: CrawlConfig, temp_parquet_path: Path):
         """Test that long text is truncated to 10000 chars."""
         config.batch_size = 5
         pipeline = Pipeline(config, temp_parquet_path)
@@ -296,9 +291,7 @@ class TestConcurrency:
     """Concurrent access tests."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_adds(
-        self, config: CrawlConfig, temp_parquet_path: Path
-    ):
+    async def test_concurrent_adds(self, config: CrawlConfig, temp_parquet_path: Path):
         """Test thread safety of concurrent adds."""
         config.batch_size = 100
         pipeline = Pipeline(config, temp_parquet_path)

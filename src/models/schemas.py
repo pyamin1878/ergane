@@ -14,9 +14,7 @@ class CrawlConfig(BaseModel):
     max_retries: int = Field(default=3, ge=0)
     retry_base_delay: float = Field(default=1.0, gt=0)
     respect_robots_txt: bool = Field(default=True)
-    user_agent: str = Field(
-        default="Arachne/0.1 (+https://github.com/arachne)"
-    )
+    user_agent: str = Field(default="Arachne/0.1 (+https://github.com/arachne)")
     max_queue_size: int = Field(default=10000, gt=0)
     batch_size: int = Field(default=100, gt=0)
 

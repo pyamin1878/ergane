@@ -1,9 +1,10 @@
-"""Shared fixtures for Arachne tests."""
-import pytest
-import tempfile
+"""Shared fixtures for Ergane tests."""
+
 from pathlib import Path
 
-from src.models import CrawlConfig, CrawlRequest, CrawlResponse, ParsedItem
+import pytest
+
+from src.models import CrawlConfig, CrawlRequest, CrawlResponse
 
 
 @pytest.fixture

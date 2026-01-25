@@ -1,10 +1,12 @@
 """Tests for the HTTP fetcher with rate limiting and retry logic."""
-import pytest
+
 import asyncio
 
-from src.models import CrawlConfig, CrawlRequest
+import pytest
+
 from src.crawler import Fetcher
 from src.crawler.fetcher import TokenBucket
+from src.models import CrawlConfig, CrawlRequest
 
 
 class TestTokenBucket:

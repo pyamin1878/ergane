@@ -1,15 +1,13 @@
 """Tests for HTML parsing functionality."""
-import pytest
-from datetime import datetime, timezone
 
-from src.models import CrawlRequest, CrawlResponse
 from src.crawler.parser import (
-    extract_text,
-    extract_title,
-    extract_links,
     extract_by_selector,
     extract_data,
+    extract_links,
+    extract_text,
+    extract_title,
 )
+from src.models import CrawlRequest, CrawlResponse
 
 
 class TestExtractTitle:
@@ -152,8 +150,7 @@ class TestExtractBySelector:
     def test_multiple_selectors(self, sample_html: str):
         """Test multiple selectors at once."""
         result = extract_by_selector(
-            sample_html,
-            {"title": "title", "heading": "h1", "missing": ".nonexistent"}
+            sample_html, {"title": "title", "heading": "h1", "missing": ".nonexistent"}
         )
         assert result["title"] == "Test Page"
         assert result["heading"] == "Welcome"
@@ -205,8 +202,7 @@ class TestExtractData:
     def test_custom_selectors(self, sample_response: CrawlResponse):
         """Test extraction with custom selectors."""
         item = extract_data(
-            sample_response,
-            selectors={"heading": "h1", "items": "span.item"}
+            sample_response, selectors={"heading": "h1", "items": "span.item"}
         )
 
         assert item.extracted_data["heading"] == "Welcome"
@@ -268,7 +264,9 @@ class TestEdgeCases:
 
     def test_unicode_content(self):
         """Test handling unicode content."""
-        html = "<html><head><title>测试页面</title></head><body>日本語テスト</body></html>"
+        html = (
+            "<html><head><title>测试页面</title></head><body>日本語テスト</body></html>"
+        )
         title = extract_title(html)
         text = extract_text(html)
 

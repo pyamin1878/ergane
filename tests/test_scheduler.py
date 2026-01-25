@@ -1,9 +1,11 @@
 """Tests for the URL scheduler with deduplication and priority queue."""
-import pytest
+
 import asyncio
 
-from src.models import CrawlConfig, CrawlRequest
+import pytest
+
 from src.crawler import Scheduler
+from src.models import CrawlConfig, CrawlRequest
 
 
 @pytest.fixture
@@ -147,10 +149,7 @@ class TestConcurrency:
     @pytest.mark.asyncio
     async def test_add_many(self, scheduler: Scheduler):
         """Test adding multiple URLs at once."""
-        requests = [
-            CrawlRequest(url=f"https://example.com/{i}")
-            for i in range(5)
-        ]
+        requests = [CrawlRequest(url=f"https://example.com/{i}") for i in range(5)]
         added = await scheduler.add_many(requests)
         assert added == 5
         assert await scheduler.size() == 5
@@ -169,6 +168,7 @@ class TestConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_adds(self, scheduler: Scheduler):
         """Test thread safety of concurrent adds."""
+
         async def add_urls(start: int, count: int):
             for i in range(count):
                 await scheduler.add(
