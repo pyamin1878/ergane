@@ -145,7 +145,7 @@ def main(
     same_domain: bool,
     ignore_robots: bool,
 ) -> None:
-    """FastCrawl - High-performance async web scraper."""
+    """Arachne - High-performance async web scraper."""
     config = CrawlConfig(
         max_requests_per_second=rate_limit,
         max_concurrent_requests=concurrency,

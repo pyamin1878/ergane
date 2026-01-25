@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "fastcrawl"
+name = "arachne"
 version = "0.1.0"
 description = "High-performance async web scraper with selectolax parsing"
 requires-python = ">=3.10"
@@ -22,7 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-fastcrawl = "src.main:main"
+arachne = "src.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
