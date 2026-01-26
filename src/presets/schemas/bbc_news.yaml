@@ -3,6 +3,7 @@ fields:
   title:
     selector: "h2[data-testid='card-headline']"
     type: str
+    default: null
   summary:
     selector: "p[data-testid='card-description']"
     type: str
@@ -11,3 +12,4 @@ fields:
     selector: "a[data-testid='internal-link']"
     attr: href
     type: str
+    default: null

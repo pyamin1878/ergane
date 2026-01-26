@@ -3,9 +3,11 @@ fields:
   quote:
     selector: "span.text"
     type: str
+    default: null
   author:
     selector: "small.author"
     type: str
+    default: null
   tags:
     selector: "div.tags a.tag"
     type: list[str]
