@@ -5,6 +5,7 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
+from src.crawler.cache import ResponseCache
 from src.models import CrawlConfig, CrawlRequest, CrawlResponse
 
 
@@ -42,6 +43,9 @@ class Fetcher:
         self._domain_buckets: dict[str, TokenBucket] = {}
         self._robots_cache: dict[str, RobotFileParser | None] = {}
         self._robots_lock = asyncio.Lock()
+        self.cache: ResponseCache | None = None
+        if config.cache_enabled:
+            self.cache = ResponseCache(config.cache_dir, config.cache_ttl)
 
     async def __aenter__(self) -> "Fetcher":
         limits = httpx.Limits(
@@ -109,6 +113,19 @@ class Fetcher:
         if not self._client:
             raise RuntimeError("Fetcher not initialized. Use async with.")
 
+        # Check cache first
+        if self.cache:
+            cached = await self.cache.get(request.url)
+            if cached:
+                return CrawlResponse(
+                    url=cached.url,
+                    status_code=cached.status_code,
+                    content=cached.content,
+                    headers=cached.headers,
+                    request=request,
+                    from_cache=True,
+                )
+
         domain = self._get_domain(request.url)
         bucket = self._get_bucket(domain)
 
@@ -126,13 +143,24 @@ class Fetcher:
 
             try:
                 resp = await self._client.get(request.url)
-                return CrawlResponse(
+                response = CrawlResponse(
                     url=str(resp.url),
                     status_code=resp.status_code,
                     content=resp.text if resp.status_code == 200 else "",
                     headers=dict(resp.headers),
                     request=request,
                 )
+
+                # Cache successful responses
+                if self.cache and response.status_code == 200:
+                    await self.cache.set(
+                        response.url,
+                        response.status_code,
+                        response.content,
+                        response.headers,
+                    )
+
+                return response
             except httpx.TimeoutException:
                 last_error = "Request timeout"
             except httpx.HTTPError as e:

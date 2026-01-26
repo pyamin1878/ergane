@@ -1,0 +1,24 @@
+name: AmazonProduct
+fields:
+  title:
+    selector: "h2 a span, h2 span a span"
+    type: str
+  price:
+    selector: "span.a-price > span.a-offscreen"
+    type: float
+    coerce: true
+    default: null
+  rating:
+    selector: "span.a-icon-alt"
+    type: float
+    coerce: true
+    default: null
+  reviews:
+    selector: "span.a-size-base.s-underline-text"
+    type: int
+    coerce: true
+    default: 0
+  link:
+    selector: "h2 a"
+    attr: href
+    type: str

@@ -1,0 +1,21 @@
+name: EbayListing
+fields:
+  title:
+    selector: "div.s-item__title span"
+    type: str
+  price:
+    selector: "span.s-item__price"
+    type: float
+    coerce: true
+  condition:
+    selector: "span.SECONDARY_INFO"
+    type: str
+    default: null
+  shipping:
+    selector: "span.s-item__shipping"
+    type: str
+    default: null
+  link:
+    selector: "a.s-item__link"
+    attr: href
+    type: str

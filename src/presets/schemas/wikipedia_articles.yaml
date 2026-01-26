@@ -1,0 +1,9 @@
+name: WikipediaArticle
+fields:
+  title:
+    selector: "#mw-pages li a"
+    type: str
+  link:
+    selector: "#mw-pages li a"
+    attr: href
+    type: str

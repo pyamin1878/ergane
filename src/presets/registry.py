@@ -46,6 +46,34 @@ PRESETS: dict[str, PresetConfig] = {
         schema_file="quotes_toscrape.yaml",
         defaults={"max_pages": 10, "max_depth": 2},
     ),
+    "amazon-products": PresetConfig(
+        name="Amazon Products",
+        description="Product search results from amazon.com",
+        start_urls=["https://www.amazon.com/s?k=python+books"],
+        schema_file="amazon_products.yaml",
+        defaults={"max_pages": 10, "max_depth": 1},
+    ),
+    "ebay-listings": PresetConfig(
+        name="eBay Listings",
+        description="Auction and buy-it-now listings from ebay.com",
+        start_urls=["https://www.ebay.com/sch/i.html?_nkw=vintage+camera"],
+        schema_file="ebay_listings.yaml",
+        defaults={"max_pages": 10, "max_depth": 1},
+    ),
+    "wikipedia-articles": PresetConfig(
+        name="Wikipedia Articles",
+        description="Article listings from Wikipedia category pages",
+        start_urls=["https://en.wikipedia.org/wiki/Category:Python_(programming_language)"],
+        schema_file="wikipedia_articles.yaml",
+        defaults={"max_pages": 20, "max_depth": 1},
+    ),
+    "bbc-news": PresetConfig(
+        name="BBC News",
+        description="Headlines from BBC News",
+        start_urls=["https://www.bbc.com/news"],
+        schema_file="bbc_news.yaml",
+        defaults={"max_pages": 10, "max_depth": 1},
+    ),
 }
 
 

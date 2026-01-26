@@ -357,6 +357,23 @@ class Crawler:
     type=click.Path(exists=True, path_type=Path),
     help="Config file path",
 )
+@click.option(
+    "--cache",
+    is_flag=True,
+    help="Enable response caching",
+)
+@click.option(
+    "--cache-dir",
+    type=click.Path(path_type=Path),
+    default=Path(".ergane_cache"),
+    help="Cache directory",
+)
+@click.option(
+    "--cache-ttl",
+    type=int,
+    default=3600,
+    help="Cache TTL in seconds",
+)
 def main(
     url: tuple[str, ...],
     output: str,
@@ -378,6 +395,9 @@ def main(
     log_file: str | None,
     no_progress: bool,
     config_file: Path | None,
+    cache: bool,
+    cache_dir: Path,
+    cache_ttl: int,
 ) -> None:
     """Ergane - High-performance async web scraper.
 
@@ -503,6 +523,9 @@ def main(
         respect_robots_txt=effective_respect_robots,
         output_schema=output_schema,
         proxy=effective_proxy,
+        cache_enabled=cache,
+        cache_dir=cache_dir,
+        cache_ttl=cache_ttl,
     )
 
     crawler = Crawler(

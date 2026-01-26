@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Type
 from urllib.parse import urlparse
 
@@ -19,6 +20,11 @@ class CrawlConfig(BaseModel):
     batch_size: int = Field(default=100, gt=0)
     output_schema: Type[BaseModel] | None = Field(default=None)
     proxy: str | None = Field(default=None, description="HTTP/HTTPS proxy URL")
+
+    # Caching
+    cache_enabled: bool = Field(default=False)
+    cache_dir: Path = Field(default=Path(".ergane_cache"))
+    cache_ttl: int = Field(default=3600, description="Cache TTL in seconds")
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -55,6 +61,7 @@ class CrawlResponse(BaseModel):
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error: str | None = None
     request: CrawlRequest
+    from_cache: bool = False
 
 
 class ParsedItem(BaseModel):
