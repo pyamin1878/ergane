@@ -22,6 +22,11 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 - **Custom Schemas** - Define Pydantic models with CSS selectors for type-safe extraction
 - **Native Types** - Lists and nested objects stored as native Parquet types (not JSON strings)
 - **Type Coercion** - Extract `"$19.99"` as `float(19.99)`, `"1,234"` as `int(1234)`
+- **Proxy Support** - Route requests through HTTP/HTTPS proxies
+- **Resume/Checkpoint** - Save and restore crawler state for long jobs
+- **Structured Logging** - Configurable log levels and file output
+- **Progress Bar** - Rich progress display with live stats
+- **Config Files** - YAML configuration for persistent settings
 
 ## Installation
 
@@ -100,6 +105,13 @@ ergane --preset hacker-news -n 100 -o hn.xlsx
 | `--format` | `-f` | `auto` | Output format: `auto`, `csv`, `excel`, `parquet` |
 | `--preset` | `-p` | none | Use a built-in preset |
 | `--list-presets` | | | Show available presets and exit |
+| `--proxy` | `-x` | none | HTTP/HTTPS proxy URL |
+| `--resume` | | | Resume from last checkpoint |
+| `--checkpoint-interval` | | `100` | Save checkpoint every N pages |
+| `--log-level` | | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `--log-file` | | none | Write logs to file |
+| `--no-progress` | | | Disable progress bar |
+| `--config` | `-C` | none | Config file path |
 
 ## Custom Schemas
 
@@ -252,6 +264,88 @@ Run the benchmark:
 ```bash
 pip install beautifulsoup4 lxml
 python benchmarks/parse_benchmark.py
+```
+
+## Proxy Support
+
+Route requests through a proxy server:
+
+```bash
+# HTTP proxy
+ergane --preset quotes --proxy http://localhost:8080 -o quotes.csv
+
+# Authenticated proxy
+ergane -u https://example.com --proxy http://user:pass@proxy:8080 -o data.csv
+```
+
+## Resume/Checkpoint
+
+For long-running crawls, Ergane automatically saves checkpoints:
+
+```bash
+# Start a large crawl
+ergane --preset quotes -n 1000 -o large.csv
+# Press Ctrl+C to interrupt
+
+# Resume from checkpoint
+ergane --preset quotes -n 1000 -o large.csv --resume
+
+# Customize checkpoint interval (default: 100 pages)
+ergane --preset quotes -n 1000 --checkpoint-interval 50 -o large.csv
+```
+
+Checkpoints are stored in `.ergane_checkpoint.json` and automatically deleted on successful completion.
+
+## Config Files
+
+Store persistent settings in a YAML config file:
+
+```yaml
+# ~/.ergane.yaml or ./.ergane.yaml
+crawler:
+  rate_limit: 10.0
+  concurrency: 20
+  timeout: 30.0
+  respect_robots_txt: true
+  user_agent: "MyBot/1.0"
+  proxy: null
+
+defaults:
+  max_pages: 100
+  max_depth: 3
+  same_domain: true
+  output_format: parquet
+
+logging:
+  level: INFO
+  file: null
+```
+
+Ergane searches for config files in order:
+1. `~/.ergane.yaml` (home directory)
+2. `./.ergane.yaml` (current directory, hidden)
+3. `./ergane.yaml` (current directory)
+
+Or specify explicitly:
+```bash
+ergane --config myconfig.yaml --preset quotes -o quotes.csv
+```
+
+CLI arguments always override config file values.
+
+## Logging
+
+Control log output with `--log-level` and `--log-file`:
+
+```bash
+# Debug output
+ergane --preset quotes --log-level DEBUG -o quotes.csv
+
+# Save logs to file
+ergane --preset quotes --log-level INFO --log-file crawl.log -o quotes.csv
+
+# Disable progress bar (useful for scripts)
+ergane --preset quotes --no-progress -o quotes.csv
 ```
 
 ## License

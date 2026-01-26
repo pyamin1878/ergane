@@ -6,8 +6,25 @@ from urllib.parse import urlparse
 
 import click
 from pydantic import BaseModel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
+from src.config import load_config, merge_config
 from src.crawler import Fetcher, Pipeline, Scheduler, extract_data, extract_typed_data
+from src.crawler.checkpoint import (
+    CHECKPOINT_FILE,
+    CrawlerCheckpoint,
+    create_checkpoint,
+    delete_checkpoint,
+    load_checkpoint,
+    save_checkpoint,
+)
+from src.logging import get_logger, setup_logging
 from src.models import CrawlConfig, CrawlRequest
 from src.presets import get_preset, get_preset_schema_path, list_presets
 from src.schema import ExtractionError, load_schema_from_yaml
@@ -38,6 +55,8 @@ class Crawler:
         same_domain: bool,
         output_schema: Type[BaseModel] | None = None,
         output_format: str = "auto",
+        checkpoint_interval: int = 100,
+        show_progress: bool = True,
     ):
         self.config = config
         self.start_urls = start_urls
@@ -47,15 +66,34 @@ class Crawler:
         self.same_domain = same_domain
         self.output_schema = output_schema
         self.output_format = output_format
+        self.checkpoint_interval = checkpoint_interval
+        self.show_progress = show_progress
         self.allowed_domains: set[str] = set()
 
         self._shutdown = asyncio.Event()
         self._pages_crawled = 0
         self._active_tasks = 0
         self._counter_lock = asyncio.Lock()
+        self._batch_number = 0
+        self._checkpoint_path = Path(CHECKPOINT_FILE)
+        self._logger = get_logger()
+        self._progress: Progress | None = None
+        self._progress_task = None
 
     def _get_domain(self, url: str) -> str:
         return urlparse(url).netloc
+
+    async def _save_checkpoint(self, scheduler: Scheduler) -> None:
+        """Save current crawler state to checkpoint file."""
+        state = scheduler.get_state()
+        checkpoint = create_checkpoint(
+            pages_crawled=self._pages_crawled,
+            seen_urls=set(state["seen_urls"]),
+            pending_queue=state["queue"],
+            batch_number=self._batch_number,
+        )
+        save_checkpoint(self._checkpoint_path, checkpoint)
+        self._logger.debug(f"Checkpoint saved: {self._pages_crawled} pages")
 
     async def _worker(
         self,
@@ -89,7 +127,7 @@ class Crawler:
                             item = extract_typed_data(response, self.output_schema)
                             await pipeline.add(item)
                         except ExtractionError as e:
-                            click.echo(f"Extraction error: {e}", err=True)
+                            self._logger.error(f"Extraction error: {e}")
                             # Fall back to legacy extraction for links
                             legacy_item = extract_data(response)
                             links = legacy_item.links
@@ -123,16 +161,25 @@ class Crawler:
                             )
                         await scheduler.add_many(new_requests)
 
-                click.echo(
-                    f"[{current_count}/{self.max_pages}] "
-                    f"{response.status_code} {request.url[:80]}"
-                )
+                # Update progress or log
+                truncated_url = request.url[:50] + "..." if len(request.url) > 50 else request.url
+                if self._progress and self._progress_task is not None:
+                    self._progress.update(
+                        self._progress_task,
+                        advance=1,
+                        url=truncated_url,
+                    )
+                else:
+                    self._logger.info(
+                        f"[{current_count}/{self.max_pages}] "
+                        f"{response.status_code} {request.url[:80]}"
+                    )
 
             finally:
                 async with self._counter_lock:
                     self._active_tasks -= 1
 
-    async def run(self) -> None:
+    async def run(self, resume_checkpoint: CrawlerCheckpoint | None = None) -> None:
         """Run the crawler."""
         for url in self.start_urls:
             self.allowed_domains.add(self._get_domain(url))
@@ -142,8 +189,39 @@ class Crawler:
             self.config, self.output_path, self.output_schema, self.output_format
         )
 
-        for url in self.start_urls:
-            await scheduler.add(CrawlRequest(url=url, depth=0, priority=0))
+        # Restore from checkpoint or start fresh
+        if resume_checkpoint:
+            self._pages_crawled = resume_checkpoint.pages_crawled
+            self._batch_number = resume_checkpoint.batch_number
+            # Restore scheduler state
+            state = {
+                "seen_urls": resume_checkpoint.seen_urls,
+                "queue": [
+                    (item["priority"], item["counter"], item["request"])
+                    for item in resume_checkpoint.pending_queue
+                ],
+            }
+            scheduler.restore_state(state)
+            self._logger.info(
+                f"Resumed from checkpoint: {self._pages_crawled} pages, "
+                f"{len(resume_checkpoint.pending_queue)} pending URLs"
+            )
+        else:
+            for url in self.start_urls:
+                await scheduler.add(CrawlRequest(url=url, depth=0, priority=0))
+
+        # Setup progress bar context
+        progress_context = (
+            Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TextColumn("[cyan]{task.fields[url]}"),
+            )
+            if self.show_progress
+            else None
+        )
 
         async with Fetcher(self.config) as fetcher:
             workers = [
@@ -152,14 +230,33 @@ class Crawler:
             ]
 
             try:
+                # Enter progress context if enabled
+                if progress_context:
+                    self._progress = progress_context
+                    self._progress.__enter__()
+                    self._progress_task = self._progress.add_task(
+                        "Crawling",
+                        total=self.max_pages,
+                        url="",
+                        completed=self._pages_crawled,
+                    )
+
+                last_checkpoint_count = self._pages_crawled
+
                 while not self._shutdown.is_set():
                     async with self._counter_lock:
                         if self._pages_crawled >= self.max_pages:
                             break
                         active = self._active_tasks
+                        current_pages = self._pages_crawled
 
                     if await scheduler.is_empty() and active == 0:
                         break
+
+                    # Save checkpoint periodically
+                    if current_pages - last_checkpoint_count >= self.checkpoint_interval:
+                        await self._save_checkpoint(scheduler)
+                        last_checkpoint_count = current_pages
 
                     await asyncio.sleep(0.5)
 
@@ -172,8 +269,20 @@ class Crawler:
                 await pipeline.flush()
                 pipeline.consolidate()
 
-        click.echo(f"\nCrawl complete: {self._pages_crawled} pages")
-        click.echo(f"Output saved to: {self.output_path}")
+                # Exit progress context if enabled
+                if self._progress:
+                    self._progress.__exit__(None, None, None)
+                    self._progress = None
+
+        # Clean up checkpoint on successful completion
+        if self._pages_crawled >= self.max_pages or (
+            await scheduler.is_empty() and self._active_tasks == 0
+        ):
+            delete_checkpoint(self._checkpoint_path)
+            self._logger.debug("Checkpoint deleted (crawl complete)")
+
+        self._logger.info(f"Crawl complete: {self._pages_crawled} pages")
+        self._logger.info(f"Output saved to: {self.output_path}")
 
 
 @click.command()
@@ -181,11 +290,11 @@ class Crawler:
 @click.option("--output", "-o", default="output.parquet", help="Output file path")
 @click.option("--max-pages", "-n", default=None, type=int, help="Maximum pages to crawl")
 @click.option("--max-depth", "-d", default=None, type=int, help="Maximum crawl depth")
-@click.option("--concurrency", "-c", default=10, help="Concurrent requests")
-@click.option("--rate-limit", "-r", default=10.0, help="Requests per second per domain")
-@click.option("--timeout", "-t", default=30.0, help="Request timeout in seconds")
-@click.option("--same-domain/--any-domain", default=True, help="Stay on same domain")
-@click.option("--ignore-robots", is_flag=True, help="Ignore robots.txt")
+@click.option("--concurrency", "-c", default=None, type=int, help="Concurrent requests")
+@click.option("--rate-limit", "-r", default=None, type=float, help="Requests per second per domain")
+@click.option("--timeout", "-t", default=None, type=float, help="Request timeout in seconds")
+@click.option("--same-domain/--any-domain", default=None, help="Stay on same domain")
+@click.option("--ignore-robots", is_flag=True, default=None, help="Ignore robots.txt")
 @click.option(
     "--schema",
     "-s",
@@ -197,7 +306,7 @@ class Crawler:
     "-f",
     "output_format",
     type=click.Choice(["auto", "csv", "excel", "parquet"]),
-    default="auto",
+    default=None,
     help="Output format (auto-detects from file extension)",
 )
 @click.option(
@@ -210,20 +319,65 @@ class Crawler:
     is_flag=True,
     help="Show available presets and exit",
 )
+@click.option(
+    "--proxy",
+    "-x",
+    help="HTTP/HTTPS proxy URL (e.g., http://localhost:8080)",
+)
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Resume from last checkpoint",
+)
+@click.option(
+    "--checkpoint-interval",
+    default=None,
+    type=int,
+    help="Save checkpoint every N pages (default: 100)",
+)
+@click.option(
+    "--log-level",
+    default=None,
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Logging level (default: INFO)",
+)
+@click.option(
+    "--log-file",
+    help="Write logs to file",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Disable progress bar",
+)
+@click.option(
+    "--config",
+    "-C",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    help="Config file path",
+)
 def main(
     url: tuple[str, ...],
     output: str,
     max_pages: int | None,
     max_depth: int | None,
-    concurrency: int,
-    rate_limit: float,
-    timeout: float,
-    same_domain: bool,
-    ignore_robots: bool,
+    concurrency: int | None,
+    rate_limit: float | None,
+    timeout: float | None,
+    same_domain: bool | None,
+    ignore_robots: bool | None,
     schema: Path | None,
-    output_format: str,
+    output_format: str | None,
     preset: str | None,
     list_presets: bool,
+    proxy: str | None,
+    resume: bool,
+    checkpoint_interval: int | None,
+    log_level: str | None,
+    log_file: str | None,
+    no_progress: bool,
+    config_file: Path | None,
 ) -> None:
     """Ergane - High-performance async web scraper.
 
@@ -239,21 +393,63 @@ def main(
         print_presets_table()
         return
 
+    # Load config file
+    file_config = load_config(config_file)
+
+    # Build CLI args dict
+    cli_args = {
+        "rate_limit": rate_limit,
+        "concurrency": concurrency,
+        "timeout": timeout,
+        "respect_robots_txt": not ignore_robots if ignore_robots is not None else None,
+        "user_agent": None,
+        "proxy": proxy,
+        "max_pages": max_pages,
+        "max_depth": max_depth,
+        "same_domain": same_domain,
+        "output_format": output_format,
+        "level": log_level,
+        "file": log_file,
+        "checkpoint_interval": checkpoint_interval,
+    }
+
+    # Merge config file with CLI args
+    merged = merge_config(file_config, cli_args)
+
+    # Setup logging
+    effective_log_level = merged.get("level", "INFO") or "INFO"
+    effective_log_file = merged.get("file")
+    logger = setup_logging(effective_log_level, effective_log_file)
+
     # Handle preset configuration
     start_urls: list[str] = []
     output_schema = None
-    effective_max_pages = max_pages if max_pages is not None else 100
-    effective_max_depth = max_depth if max_depth is not None else 3
+
+    # Get effective values with defaults
+    effective_max_pages = merged.get("max_pages", 100) or 100
+    effective_max_depth = merged.get("max_depth", 3) or 3
+    effective_concurrency = merged.get("concurrency", 10) or 10
+    effective_rate_limit = merged.get("rate_limit", 10.0) or 10.0
+    effective_timeout = merged.get("timeout", 30.0) or 30.0
+    effective_proxy = merged.get("proxy")
+    effective_same_domain = merged.get("same_domain", True)
+    if effective_same_domain is None:
+        effective_same_domain = True
+    effective_respect_robots = merged.get("respect_robots_txt", True)
+    if effective_respect_robots is None:
+        effective_respect_robots = True
+    effective_output_format = merged.get("output_format", "auto") or "auto"
+    effective_checkpoint_interval = merged.get("checkpoint_interval", 100) or 100
 
     if preset:
         try:
             preset_config = get_preset(preset)
-            click.echo(f"Using preset: {preset_config.name}")
+            logger.info(f"Using preset: {preset_config.name}")
 
             # Load preset schema
             schema_path = get_preset_schema_path(preset)
             output_schema = load_schema_from_yaml(schema_path)
-            click.echo(f"Loaded schema: {output_schema.__name__}")
+            logger.info(f"Loaded schema: {output_schema.__name__}")
 
             # Use preset start URLs if none provided
             if not url:
@@ -261,10 +457,10 @@ def main(
             else:
                 start_urls = list(url)
 
-            # Apply preset defaults if not overridden
-            if max_pages is None:
+            # Apply preset defaults if not overridden via CLI
+            if max_pages is None and "max_pages" not in file_config.get("defaults", {}):
                 effective_max_pages = preset_config.defaults.get("max_pages", 100)
-            if max_depth is None:
+            if max_depth is None and "max_depth" not in file_config.get("defaults", {}):
                 effective_max_depth = preset_config.defaults.get("max_depth", 3)
 
         except KeyError as e:
@@ -278,7 +474,7 @@ def main(
         if schema:
             try:
                 output_schema = load_schema_from_yaml(schema)
-                click.echo(f"Loaded schema: {output_schema.__name__}")
+                logger.info(f"Loaded schema: {output_schema.__name__}")
             except Exception as e:
                 raise click.ClickException(f"Failed to load schema: {e}")
 
@@ -290,12 +486,23 @@ def main(
             "At least one URL is required. Use --url/-u option or --preset."
         )
 
+    # Check for resume checkpoint
+    checkpoint_path = Path(CHECKPOINT_FILE)
+    resume_checkpoint: CrawlerCheckpoint | None = None
+    if resume:
+        resume_checkpoint = load_checkpoint(checkpoint_path)
+        if resume_checkpoint is None:
+            logger.warning("No checkpoint found, starting fresh")
+        else:
+            logger.info(f"Found checkpoint from {resume_checkpoint.timestamp}")
+
     config = CrawlConfig(
-        max_requests_per_second=rate_limit,
-        max_concurrent_requests=concurrency,
-        request_timeout=timeout,
-        respect_robots_txt=not ignore_robots,
+        max_requests_per_second=effective_rate_limit,
+        max_concurrent_requests=effective_concurrency,
+        request_timeout=effective_timeout,
+        respect_robots_txt=effective_respect_robots,
         output_schema=output_schema,
+        proxy=effective_proxy,
     )
 
     crawler = Crawler(
@@ -304,19 +511,21 @@ def main(
         output_path=output,
         max_pages=effective_max_pages,
         max_depth=effective_max_depth,
-        same_domain=same_domain,
+        same_domain=effective_same_domain,
         output_schema=output_schema,
-        output_format=output_format,
+        output_format=effective_output_format,
+        checkpoint_interval=effective_checkpoint_interval,
+        show_progress=not no_progress,
     )
 
     def handle_shutdown(signum, frame):
-        click.echo("\nShutting down gracefully...")
+        logger.info("Shutting down gracefully...")
         crawler._shutdown.set()
 
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
 
-    asyncio.run(crawler.run())
+    asyncio.run(crawler.run(resume_checkpoint=resume_checkpoint))
 
 
 if __name__ == "__main__":

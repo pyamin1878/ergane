@@ -5,6 +5,16 @@ from urllib.parse import urlparse
 from src.models import CrawlConfig, CrawlRequest
 
 
+def _request_to_dict(request: CrawlRequest) -> dict:
+    """Convert CrawlRequest to dict for serialization."""
+    return {
+        "url": request.url,
+        "depth": request.depth,
+        "priority": request.priority,
+        "metadata": request.metadata,
+    }
+
+
 class Scheduler:
     """URL frontier with deduplication and priority queue support."""
 
@@ -96,3 +106,32 @@ class Scheduler:
         """Mark a URL as seen without adding to queue."""
         normalized = self._normalize_url(url)
         self._seen.add(normalized)
+
+    def get_state(self) -> dict:
+        """Export scheduler state for checkpointing.
+
+        Returns:
+            Dictionary with seen_urls and queue data.
+        """
+        return {
+            "seen_urls": list(self._seen),
+            "queue": [
+                (p, c, _request_to_dict(r)) for p, c, r in self._queue
+            ],
+        }
+
+    def restore_state(self, state: dict) -> None:
+        """Restore scheduler state from checkpoint.
+
+        Args:
+            state: Dictionary with seen_urls and queue data.
+        """
+        self._seen = set(state["seen_urls"])
+        self._queue = [
+            (p, c, CrawlRequest(**r)) for p, c, r in state["queue"]
+        ]
+        # Update counter to avoid duplicates
+        if self._queue:
+            self._counter = max(c for _, c, _ in self._queue) + 1
+        if self._queue:
+            self._not_empty.set()

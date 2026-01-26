@@ -54,6 +54,7 @@ class Fetcher:
             follow_redirects=True,
             headers={"User-Agent": self.config.user_agent},
             limits=limits,
+            proxy=self.config.proxy,
         )
         return self
 

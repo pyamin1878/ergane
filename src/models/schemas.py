@@ -18,6 +18,7 @@ class CrawlConfig(BaseModel):
     max_queue_size: int = Field(default=10000, gt=0)
     batch_size: int = Field(default=100, gt=0)
     output_schema: Type[BaseModel] | None = Field(default=None)
+    proxy: str | None = Field(default=None, description="HTTP/HTTPS proxy URL")
 
     model_config = {"arbitrary_types_allowed": True}
 

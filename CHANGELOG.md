@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-01-26
+
+### Added
+
+- **Proxy Support**: Route requests through HTTP/HTTPS proxies
+  - New `--proxy/-x` CLI option for proxy URL
+  - Supports authentication via URL (e.g., `http://user:pass@proxy:8080`)
+
+- **Resume/Checkpoint**: Save and restore crawler state for long-running jobs
+  - Automatic checkpoint saving every N pages (configurable via `--checkpoint-interval`)
+  - Resume interrupted crawls with `--resume` flag
+  - Checkpoint stored in `.ergane_checkpoint.json`
+
+- **Structured Logging**: Replaced `click.echo` with Python logging
+  - Configurable log levels via `--log-level` (DEBUG, INFO, WARNING, ERROR)
+  - Optional file logging via `--log-file`
+  - Timestamps and log levels in output
+
+- **Progress Bar**: Rich progress display during crawling
+  - Spinner, progress bar, and current URL display
+  - Disable with `--no-progress` flag
+  - New dependency: `rich>=13.0.0`
+
+- **Config File Support**: Load settings from YAML config files
+  - Automatic search in `~/.ergane.yaml`, `./.ergane.yaml`, `./ergane.yaml`
+  - Explicit path via `--config/-C` option
+  - CLI args override config file values
+
+### New CLI Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--proxy` | `-x` | HTTP/HTTPS proxy URL |
+| `--resume` | | Resume from last checkpoint |
+| `--checkpoint-interval` | | Save checkpoint every N pages (default: 100) |
+| `--log-level` | | DEBUG, INFO, WARNING, ERROR (default: INFO) |
+| `--log-file` | | Write logs to file |
+| `--no-progress` | | Disable progress bar |
+| `--config` | `-C` | Config file path |
+
+### Config File Format
+
+```yaml
+# ~/.ergane.yaml
+crawler:
+  rate_limit: 10.0
+  concurrency: 20
+  timeout: 30.0
+  respect_robots_txt: true
+  user_agent: "MyBot/1.0"
+  proxy: null
+
+defaults:
+  max_pages: 100
+  max_depth: 3
+  same_domain: true
+  output_format: parquet
+
+logging:
+  level: INFO
+  file: null
+```
+
 ## [0.3.0] - 2026-01-25
 
 ### Added
