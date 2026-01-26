@@ -1,11 +1,15 @@
 import asyncio
 import signal
+from pathlib import Path
+from typing import Type
 from urllib.parse import urlparse
 
 import click
+from pydantic import BaseModel
 
-from src.crawler import Fetcher, Pipeline, Scheduler, extract_data
+from src.crawler import Fetcher, Pipeline, Scheduler, extract_data, extract_typed_data
 from src.models import CrawlConfig, CrawlRequest
+from src.schema import ExtractionError, load_schema_from_yaml
 
 
 class Crawler:
@@ -19,6 +23,7 @@ class Crawler:
         max_pages: int,
         max_depth: int,
         same_domain: bool,
+        output_schema: Type[BaseModel] | None = None,
     ):
         self.config = config
         self.start_urls = start_urls
@@ -26,6 +31,7 @@ class Crawler:
         self.max_pages = max_pages
         self.max_depth = max_depth
         self.same_domain = same_domain
+        self.output_schema = output_schema
         self.allowed_domains: set[str] = set()
 
         self._shutdown = asyncio.Event()
@@ -62,12 +68,33 @@ class Crawler:
                     current_count = self._pages_crawled
 
                 if response.status_code == 200 and response.content:
-                    item = extract_data(response)
-                    await pipeline.add(item)
+                    # Use custom schema or legacy ParsedItem
+                    if self.output_schema is not None:
+                        try:
+                            item = extract_typed_data(response, self.output_schema)
+                            await pipeline.add(item)
+                        except ExtractionError as e:
+                            click.echo(f"Extraction error: {e}", err=True)
+                            # Fall back to legacy extraction for links
+                            legacy_item = extract_data(response)
+                            links = legacy_item.links
+                    else:
+                        item = extract_data(response)
+                        await pipeline.add(item)
+                        links = item.links
 
+                    # Queue new URLs (only from legacy extraction or if schema didn't fail)
                     if request.depth < self.max_depth:
+                        # Get links for scheduling
+                        if self.output_schema is None:
+                            pass  # links already set
+                        else:
+                            # Extract links separately for custom schemas
+                            legacy_item = extract_data(response)
+                            links = legacy_item.links
+
                         new_requests = []
-                        for link in item.links:
+                        for link in links:
                             domain = self._get_domain(link)
                             if self.same_domain and domain not in self.allowed_domains:
                                 continue
@@ -96,7 +123,7 @@ class Crawler:
             self.allowed_domains.add(self._get_domain(url))
 
         scheduler = Scheduler(self.config)
-        pipeline = Pipeline(self.config, self.output_path)
+        pipeline = Pipeline(self.config, self.output_path, self.output_schema)
 
         for url in self.start_urls:
             await scheduler.add(CrawlRequest(url=url, depth=0, priority=0))
@@ -142,6 +169,12 @@ class Crawler:
 @click.option("--timeout", "-t", default=30.0, help="Request timeout in seconds")
 @click.option("--same-domain/--any-domain", default=True, help="Stay on same domain")
 @click.option("--ignore-robots", is_flag=True, help="Ignore robots.txt")
+@click.option(
+    "--schema",
+    "-s",
+    type=click.Path(exists=True, path_type=Path),
+    help="YAML schema file for custom output fields",
+)
 def main(
     url: tuple[str, ...],
     output: str,
@@ -152,13 +185,24 @@ def main(
     timeout: float,
     same_domain: bool,
     ignore_robots: bool,
+    schema: Path | None,
 ) -> None:
     """Ergane - High-performance async web scraper."""
+    # Load schema if provided
+    output_schema = None
+    if schema:
+        try:
+            output_schema = load_schema_from_yaml(schema)
+            click.echo(f"Loaded schema: {output_schema.__name__}")
+        except Exception as e:
+            raise click.ClickException(f"Failed to load schema: {e}")
+
     config = CrawlConfig(
         max_requests_per_second=rate_limit,
         max_concurrent_requests=concurrency,
         request_timeout=timeout,
         respect_robots_txt=not ignore_robots,
+        output_schema=output_schema,
     )
 
     crawler = Crawler(
@@ -168,6 +212,7 @@ def main(
         max_pages=max_pages,
         max_depth=max_depth,
         same_domain=same_domain,
+        output_schema=output_schema,
     )
 
     def handle_shutdown(signum, frame):

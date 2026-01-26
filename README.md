@@ -18,6 +18,9 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 - **Smart Scheduling** - Priority queue with URL deduplication
 - **Parquet Output** - Efficient columnar storage via polars
 - **Graceful Shutdown** - Clean termination on SIGINT/SIGTERM
+- **Custom Schemas** - Define Pydantic models with CSS selectors for type-safe extraction
+- **Native Types** - Lists and nested objects stored as native Parquet types (not JSON strings)
+- **Type Coercion** - Extract `"$19.99"` as `float(19.99)`, `"1,234"` as `int(1234)`
 
 ## Installation
 
@@ -58,6 +61,95 @@ ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 | `--same-domain` | | `true` | Stay on same domain as start URLs |
 | `--any-domain` | | `false` | Follow links to any domain |
 | `--ignore-robots` | | `false` | Ignore robots.txt restrictions |
+| `--schema` | `-s` | none | YAML schema file for custom output fields |
+
+## Custom Schemas
+
+Define your own output schema with CSS selectors for type-safe extraction:
+
+### Programmatic Usage
+
+```python
+from pydantic import BaseModel
+from datetime import datetime
+from ergane.schema import selector
+
+class ProductItem(BaseModel):
+    url: str                    # Auto-populated from crawled URL
+    crawled_at: datetime        # Auto-populated timestamp
+
+    name: str = selector("h1.product-title")
+    price: float = selector("span.price", coerce=True)  # "$19.99" -> 19.99
+    tags: list[str] = selector("span.tag")              # Native list type
+    image_url: str = selector("img.product", attr="src")
+    in_stock: bool = selector("span.availability")
+
+# Use with Crawler
+from ergane import Crawler, CrawlConfig
+
+config = CrawlConfig(output_schema=ProductItem)
+crawler = Crawler(
+    config=config,
+    start_urls=["https://example.com/products"],
+    output_path="products.parquet",
+    max_pages=100,
+    max_depth=2,
+    same_domain=True,
+)
+await crawler.run()
+```
+
+### YAML Schema (CLI)
+
+Create a schema file `schema.yaml`:
+
+```yaml
+name: ProductItem
+fields:
+  name:
+    selector: "h1.product-title"
+    type: str
+  price:
+    selector: "span.price"
+    type: float
+    coerce: true
+  tags:
+    selector: "span.tag"
+    type: list[str]
+  image_url:
+    selector: "img.product"
+    attr: src
+    type: str
+```
+
+Then run:
+
+```bash
+ergane -u https://example.com --schema schema.yaml -o products.parquet
+```
+
+### Type Coercion
+
+The `coerce=true` option enables smart type conversion:
+
+| Input | Target Type | Result |
+|-------|-------------|--------|
+| `"$19.99"` | `float` | `19.99` |
+| `"1,234"` | `int` | `1234` |
+| `"yes"` / `"true"` / `"1"` | `bool` | `True` |
+| `"2024-01-15"` | `datetime` | `datetime(2024, 1, 15)` |
+
+### Supported Types
+
+| Python Type | Parquet Type | Example |
+|-------------|--------------|---------|
+| `str` | `Utf8` | `"Hello"` |
+| `int` | `Int64` | `42` |
+| `float` | `Float64` | `3.14` |
+| `bool` | `Boolean` | `True` |
+| `datetime` | `Datetime` | `datetime.now()` |
+| `list[T]` | `List(T)` | `["a", "b"]` |
+| `BaseModel` | `Struct` | Nested object |
 
 ## Output Format
 

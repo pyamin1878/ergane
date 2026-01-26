@@ -1,9 +1,11 @@
-from typing import Any
+from typing import Any, Type
 from urllib.parse import urljoin, urlparse
 
+from pydantic import BaseModel
 from selectolax.parser import HTMLParser
 
 from src.models import CrawlResponse, ParsedItem
+from src.schema import SchemaConfig, SchemaExtractor
 
 
 def _extract_text_from_tree(tree: HTMLParser) -> str:
@@ -148,5 +150,26 @@ def extract_data(
         text=text,
         links=links,
         extracted_data=extracted,
+        crawled_at=response.fetched_at,
+    )
+
+
+def extract_typed_data(
+    response: CrawlResponse,
+    schema: Type[BaseModel],
+) -> BaseModel:
+    """Extract data from a crawl response into a custom typed schema.
+
+    Args:
+        response: The crawl response to parse
+        schema: Pydantic model class with selector metadata
+
+    Returns:
+        Instance of the schema model with extracted data
+    """
+    extractor = SchemaExtractor.from_model(schema)
+    return extractor.extract(
+        html=response.content,
+        url=response.url,
         crawled_at=response.fetched_at,
     )

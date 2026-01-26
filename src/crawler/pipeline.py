@@ -1,10 +1,15 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Any, Type, TypeVar
 
 import polars as pl
+from pydantic import BaseModel
 
 from src.models import CrawlConfig, ParsedItem
+from src.schema import ParquetSchemaMapper
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class Pipeline:
@@ -13,12 +18,22 @@ class Pipeline:
     Uses incremental batch files to avoid O(n²) read-concat-rewrite pattern.
     Output files are named: base_000001.parquet, base_000002.parquet, etc.
     Call consolidate() after crawl to merge into single file if desired.
+
+    Supports two modes:
+    1. Legacy mode (ParsedItem): Uses JSON strings for lists/dicts
+    2. Schema mode (custom BaseModel): Uses native Polars types
     """
 
-    def __init__(self, config: CrawlConfig, output_path: str | Path):
+    def __init__(
+        self,
+        config: CrawlConfig,
+        output_path: str | Path,
+        output_schema: Type[BaseModel] | None = None,
+    ):
         self.config = config
         self.output_path = Path(output_path)
-        self._buffer: list[ParsedItem] = []
+        self.output_schema = output_schema
+        self._buffer: list[BaseModel] = []
         self._lock = asyncio.Lock()
         self._total_written = 0
         self._batch_number = 0
@@ -33,14 +48,14 @@ class Pipeline:
         parent = self.output_path.parent
         return parent / f"{stem}_{self._batch_number:06d}{suffix}"
 
-    async def add(self, item: ParsedItem) -> None:
+    async def add(self, item: BaseModel) -> None:
         """Add an item to the buffer, flushing if batch size reached."""
         async with self._lock:
             self._buffer.append(item)
             if len(self._buffer) >= self.config.batch_size:
                 await self._flush_unlocked()
 
-    async def add_many(self, items: list[ParsedItem]) -> None:
+    async def add_many(self, items: list[BaseModel]) -> None:
         """Add multiple items to the buffer."""
         async with self._lock:
             self._buffer.extend(items)
@@ -55,25 +70,53 @@ class Pipeline:
         batch = self._buffer[: self.config.batch_size]
         self._buffer = self._buffer[self.config.batch_size :]
 
-        records = [
-            {
-                "url": item.url,
-                "title": item.title,
-                "text": item.text[:10000] if item.text else None,
-                "links": json.dumps(item.links),
-                "extracted_data": json.dumps(item.extracted_data),
-                "crawled_at": item.crawled_at.isoformat(),
-            }
-            for item in batch
-        ]
-
-        df = pl.DataFrame(records)
+        # Use appropriate serialization based on schema mode
+        if self.output_schema is not None:
+            df = self._create_schema_dataframe(batch)
+        else:
+            df = self._create_legacy_dataframe(batch)
 
         # Write to numbered batch file (O(1) per batch instead of O(n))
         batch_path = self._get_batch_path()
         df.write_parquet(batch_path)
         self._batch_number += 1
         self._total_written += len(batch)
+
+    def _create_legacy_dataframe(self, items: list[BaseModel]) -> pl.DataFrame:
+        """Create DataFrame for legacy ParsedItem mode with JSON strings.
+
+        Args:
+            items: List of ParsedItem instances
+
+        Returns:
+            Polars DataFrame with JSON-serialized lists/dicts
+        """
+        records = []
+        for item in items:
+            if isinstance(item, ParsedItem):
+                records.append({
+                    "url": item.url,
+                    "title": item.title,
+                    "text": item.text[:10000] if item.text else None,
+                    "links": json.dumps(item.links),
+                    "extracted_data": json.dumps(item.extracted_data),
+                    "crawled_at": item.crawled_at.isoformat(),
+                })
+            else:
+                # Fallback for other BaseModel types in legacy mode
+                records.append(item.model_dump())
+        return pl.DataFrame(records)
+
+    def _create_schema_dataframe(self, items: list[BaseModel]) -> pl.DataFrame:
+        """Create DataFrame for custom schema mode with native types.
+
+        Args:
+            items: List of custom schema model instances
+
+        Returns:
+            Polars DataFrame with native Parquet types
+        """
+        return ParquetSchemaMapper.models_to_dataframe(items, self.output_schema)
 
     async def flush(self) -> None:
         """Flush any remaining items in the buffer."""

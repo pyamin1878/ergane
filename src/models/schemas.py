@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Type
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
@@ -17,6 +17,9 @@ class CrawlConfig(BaseModel):
     user_agent: str = Field(default="Arachne/0.1 (+https://github.com/arachne)")
     max_queue_size: int = Field(default=10000, gt=0)
     batch_size: int = Field(default=100, gt=0)
+    output_schema: Type[BaseModel] | None = Field(default=None)
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class CrawlRequest(BaseModel):
