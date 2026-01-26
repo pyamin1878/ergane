@@ -3,10 +3,12 @@ fields:
   title:
     selector: "div.s-item__title span"
     type: str
+    default: null
   price:
     selector: "span.s-item__price"
     type: float
     coerce: true
+    default: null
   condition:
     selector: "span.SECONDARY_INFO"
     type: str
@@ -19,3 +21,4 @@ fields:
     selector: "a.s-item__link"
     attr: href
     type: str
+    default: null

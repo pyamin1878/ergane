@@ -3,6 +3,7 @@ fields:
   title:
     selector: "h2 a span, h2 span a span"
     type: str
+    default: null
   price:
     selector: "span.a-price > span.a-offscreen"
     type: float
@@ -22,3 +23,4 @@ fields:
     selector: "h2 a"
     attr: href
     type: str
+    default: null
