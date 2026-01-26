@@ -1,7 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Type, TypeVar
+from typing import Any, Literal, Type, TypeVar
 
 import polars as pl
 from pydantic import BaseModel
@@ -11,24 +11,39 @@ from src.schema import ParquetSchemaMapper
 
 T = TypeVar("T", bound=BaseModel)
 
+OutputFormat = Literal["parquet", "csv", "excel", "auto"]
+
 
 class Pipeline:
-    """Data output pipeline with batched parquet writes.
+    """Data output pipeline with batched writes supporting multiple formats.
 
     Uses incremental batch files to avoid O(n²) read-concat-rewrite pattern.
-    Output files are named: base_000001.parquet, base_000002.parquet, etc.
+    Output files are named: base_000001.parquet, base_000001.csv, etc.
     Call consolidate() after crawl to merge into single file if desired.
 
     Supports two modes:
     1. Legacy mode (ParsedItem): Uses JSON strings for lists/dicts
     2. Schema mode (custom BaseModel): Uses native Polars types
+
+    Supported output formats:
+    - parquet: Efficient columnar storage (default)
+    - csv: Universal text format, widely compatible
+    - excel: .xlsx format for spreadsheet applications
     """
+
+    EXTENSION_MAP = {
+        ".parquet": "parquet",
+        ".csv": "csv",
+        ".xlsx": "excel",
+        ".xls": "excel",
+    }
 
     def __init__(
         self,
         config: CrawlConfig,
         output_path: str | Path,
         output_schema: Type[BaseModel] | None = None,
+        output_format: OutputFormat = "auto",
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -38,13 +53,33 @@ class Pipeline:
         self._total_written = 0
         self._batch_number = 0
 
+        # Determine output format
+        if output_format == "auto":
+            self.output_format = self._detect_format(self.output_path)
+        else:
+            self.output_format = output_format
+
         # Create output directory if it doesn't exist
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _detect_format(self, path: Path) -> str:
+        """Detect output format from file extension."""
+        suffix = path.suffix.lower()
+        return self.EXTENSION_MAP.get(suffix, "parquet")
+
+    def _get_batch_extension(self) -> str:
+        """Get file extension for current output format."""
+        format_extensions = {
+            "parquet": ".parquet",
+            "csv": ".csv",
+            "excel": ".xlsx",
+        }
+        return format_extensions.get(self.output_format, ".parquet")
 
     def _get_batch_path(self) -> Path:
         """Generate path for next batch file."""
         stem = self.output_path.stem
-        suffix = self.output_path.suffix or ".parquet"
+        suffix = self._get_batch_extension()
         parent = self.output_path.parent
         return parent / f"{stem}_{self._batch_number:06d}{suffix}"
 
@@ -63,7 +98,7 @@ class Pipeline:
                 await self._flush_unlocked()
 
     async def _flush_unlocked(self) -> None:
-        """Write buffer to parquet batch file (must hold lock)."""
+        """Write buffer to batch file in configured format (must hold lock)."""
         if not self._buffer:
             return
 
@@ -78,9 +113,26 @@ class Pipeline:
 
         # Write to numbered batch file (O(1) per batch instead of O(n))
         batch_path = self._get_batch_path()
-        df.write_parquet(batch_path)
+        self._write_dataframe(df, batch_path)
         self._batch_number += 1
         self._total_written += len(batch)
+
+    def _write_dataframe(self, df: pl.DataFrame, path: Path) -> None:
+        """Write DataFrame to file in the configured format."""
+        if self.output_format == "csv":
+            self._write_csv(df, path)
+        elif self.output_format == "excel":
+            self._write_excel(df, path)
+        else:
+            df.write_parquet(path)
+
+    def _write_csv(self, df: pl.DataFrame, path: Path) -> None:
+        """Write DataFrame to CSV file."""
+        df.write_csv(path)
+
+    def _write_excel(self, df: pl.DataFrame, path: Path) -> None:
+        """Write DataFrame to Excel file."""
+        df.write_excel(path)
 
     def _create_legacy_dataframe(self, items: list[BaseModel]) -> pl.DataFrame:
         """Create DataFrame for legacy ParsedItem mode with JSON strings.
@@ -132,9 +184,10 @@ class Pipeline:
         """
         stem = self.output_path.stem
         parent = self.output_path.parent
+        batch_ext = self._get_batch_extension()
 
         # Find all batch files
-        batch_files = sorted(parent.glob(f"{stem}_*.parquet"))
+        batch_files = sorted(parent.glob(f"{stem}_*{batch_ext}"))
 
         if not batch_files:
             return self.output_path
@@ -145,9 +198,9 @@ class Pipeline:
             return self.output_path
 
         # Read and concatenate all batch files
-        dfs = [pl.read_parquet(f) for f in batch_files]
+        dfs = [self._read_batch_file(f) for f in batch_files]
         combined = pl.concat(dfs)
-        combined.write_parquet(self.output_path)
+        self._write_dataframe(combined, self.output_path)
 
         # Clean up batch files
         for f in batch_files:
@@ -155,11 +208,21 @@ class Pipeline:
 
         return self.output_path
 
+    def _read_batch_file(self, path: Path) -> pl.DataFrame:
+        """Read a batch file in the appropriate format."""
+        if self.output_format == "csv":
+            return pl.read_csv(path)
+        elif self.output_format == "excel":
+            return pl.read_excel(path)
+        else:
+            return pl.read_parquet(path)
+
     def get_batch_files(self) -> list[Path]:
         """Return list of all batch files created."""
         stem = self.output_path.stem
         parent = self.output_path.parent
-        return sorted(parent.glob(f"{stem}_*.parquet"))
+        batch_ext = self._get_batch_extension()
+        return sorted(parent.glob(f"{stem}_*{batch_ext}"))
 
     @property
     def total_written(self) -> int:

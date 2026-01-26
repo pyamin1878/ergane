@@ -1,0 +1,27 @@
+name: RedditPost
+fields:
+  title:
+    selector: "a.title"
+    type: str
+  subreddit:
+    selector: "a.subreddit"
+    type: str
+    default: null
+  score:
+    selector: "div.score.unvoted"
+    type: int
+    coerce: true
+    default: 0
+  author:
+    selector: "a.author"
+    type: str
+    default: null
+  comments:
+    selector: "a.comments"
+    type: int
+    coerce: true
+    default: 0
+  link:
+    selector: "a.title"
+    attr: href
+    type: str

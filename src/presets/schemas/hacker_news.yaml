@@ -1,0 +1,23 @@
+name: HackerNewsStory
+fields:
+  title:
+    selector: "span.titleline > a"
+    type: str
+  link:
+    selector: "span.titleline > a"
+    attr: href
+    type: str
+  score:
+    selector: "span.score"
+    type: int
+    coerce: true
+    default: 0
+  author:
+    selector: "a.hnuser"
+    type: str
+    default: null
+  comments:
+    selector: "span.subline a:last-child"
+    type: int
+    coerce: true
+    default: 0

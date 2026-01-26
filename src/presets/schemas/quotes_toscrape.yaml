@@ -1,0 +1,12 @@
+name: Quote
+fields:
+  quote:
+    selector: "span.text"
+    type: str
+  author:
+    selector: "small.author"
+    type: str
+  tags:
+    selector: "div.tags a.tag"
+    type: list[str]
+    default: []

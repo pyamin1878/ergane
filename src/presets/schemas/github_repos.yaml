@@ -1,0 +1,22 @@
+name: GitHubRepository
+fields:
+  name:
+    selector: "div.search-title a"
+    type: str
+  description:
+    selector: "p.color-fg-muted"
+    type: str
+    default: null
+  stars:
+    selector: "a[href*='/stargazers']"
+    type: int
+    coerce: true
+    default: 0
+  language:
+    selector: "span[itemprop='programmingLanguage']"
+    type: str
+    default: null
+  link:
+    selector: "div.search-title a"
+    attr: href
+    type: str

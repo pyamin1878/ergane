@@ -16,7 +16,8 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 - **robots.txt Compliance** - Respects crawler directives by default
 - **Fast HTML Parsing** - Selectolax with CSS selector extraction (16x faster than BeautifulSoup)
 - **Smart Scheduling** - Priority queue with URL deduplication
-- **Parquet Output** - Efficient columnar storage via polars
+- **Multi-Format Output** - Export to CSV, Excel, or Parquet
+- **Built-in Presets** - Pre-configured schemas for common sites (no coding required)
 - **Graceful Shutdown** - Clean termination on SIGINT/SIGTERM
 - **Custom Schemas** - Define Pydantic models with CSS selectors for type-safe extraction
 - **Native Types** - Lists and nested objects stored as native Parquet types (not JSON strings)
@@ -36,6 +37,21 @@ pip install ergane[dev]
 
 ## Quick Start
 
+### Using Presets (Easiest)
+
+```bash
+# Use a preset - no schema needed!
+ergane --preset quotes -o quotes.csv
+
+# Export to Excel
+ergane --preset hacker-news -o stories.xlsx
+
+# List available presets
+ergane --list-presets
+```
+
+### Manual Crawling
+
 ```bash
 # Crawl a single site
 ergane -u https://example.com -n 100
@@ -47,11 +63,30 @@ ergane -u https://site1.com -u https://site2.com -n 500
 ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 ```
 
+## Built-in Presets
+
+Presets provide pre-configured schemas for popular websites:
+
+| Preset | Site | Fields Extracted |
+|--------|------|------------------|
+| `hacker-news` | news.ycombinator.com | title, link, score, author, comments |
+| `github-repos` | github.com/search | name, description, stars, language, link |
+| `reddit` | old.reddit.com | title, subreddit, score, author, comments, link |
+| `quotes` | quotes.toscrape.com | quote, author, tags |
+
+```bash
+# See all presets
+ergane --list-presets
+
+# Use preset with custom settings
+ergane --preset hacker-news -n 100 -o hn.xlsx
+```
+
 ## CLI Options
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--url` | `-u` | required | Start URL(s), can specify multiple |
+| `--url` | `-u` | none | Start URL(s), can specify multiple |
 | `--output` | `-o` | `output.parquet` | Output file path |
 | `--max-pages` | `-n` | `100` | Maximum pages to crawl |
 | `--max-depth` | `-d` | `3` | Maximum crawl depth from start URLs |
@@ -62,6 +97,9 @@ ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 | `--any-domain` | | `false` | Follow links to any domain |
 | `--ignore-robots` | | `false` | Ignore robots.txt restrictions |
 | `--schema` | `-s` | none | YAML schema file for custom output fields |
+| `--format` | `-f` | `auto` | Output format: `auto`, `csv`, `excel`, `parquet` |
+| `--preset` | `-p` | none | Use a built-in preset |
+| `--list-presets` | | | Show available presets and exit |
 
 ## Custom Schemas
 
@@ -151,9 +189,27 @@ The `coerce=true` option enables smart type conversion:
 | `list[T]` | `List(T)` | `["a", "b"]` |
 | `BaseModel` | `Struct` | Nested object |
 
-## Output Format
+## Output Formats
 
-Results are saved as a Parquet file with the following schema:
+Ergane supports multiple output formats, auto-detected from file extension:
+
+| Extension | Format | Best For |
+|-----------|--------|----------|
+| `.csv` | CSV | Universal compatibility, spreadsheets |
+| `.xlsx` | Excel | Business users, non-technical stakeholders |
+| `.parquet` | Parquet | Large datasets, data pipelines |
+
+```bash
+# Auto-detect from extension
+ergane --preset quotes -o quotes.csv
+ergane --preset quotes -o quotes.xlsx
+ergane --preset quotes -o quotes.parquet
+
+# Or explicitly specify format
+ergane --preset quotes -o data.out --format csv
+```
+
+### Default Schema (without custom schema)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -164,12 +220,16 @@ Results are saved as a Parquet file with the following schema:
 | `extracted_data` | string | JSON object of custom extractions |
 | `crawled_at` | string | ISO timestamp |
 
-Read results with polars:
+### Reading Results
 
 ```python
 import polars as pl
 
+# Read any format
 df = pl.read_parquet("output.parquet")
+df = pl.read_csv("output.csv")
+df = pl.read_excel("output.xlsx")
+
 print(df.head())
 ```
 

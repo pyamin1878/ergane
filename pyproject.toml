@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ergane"
-version = "0.2.0"
+version = "0.3.0"
 description = "High-performance async web scraper with selectolax parsing"
 authors = [{name = "pyamin1878"}]
 license = {text = "MIT"}
@@ -29,6 +29,8 @@ dependencies = [
     "pydantic>=2.0.0",
     "click>=8.1.0",
     "pyyaml>=6.0.0",
+    "xlsxwriter>=3.1.0",
+    "fastexcel>=0.7.0",
 ]
 
 [project.optional-dependencies]
