@@ -85,7 +85,9 @@ class Fetcher:
                 return self._robots_cache[robots_url]
 
         try:
-            resp = await self._client.get(robots_url, timeout=10.0)
+            resp = await self._client.get(
+                robots_url, timeout=self.config.request_timeout
+            )
             if resp.status_code == 200:
                 rp = RobotFileParser()
                 rp.parse(resp.text.splitlines())

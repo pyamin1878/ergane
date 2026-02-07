@@ -73,17 +73,20 @@ class SchemaExtractor:
                     data[field_name] = crawled_at
             elif field_config.selector:
                 # Extract using CSS selector
-                value = self._extract_field(tree, field_config)
+                value = self._extract_field(tree, field_config, url)
                 data[field_name] = value
 
         return self.schema_config.model(**data)
 
-    def _extract_field(self, tree: HTMLParser, field_config: FieldConfig) -> Any:
+    def _extract_field(
+        self, tree: HTMLParser, field_config: FieldConfig, url: str = ""
+    ) -> Any:
         """Extract a single field value from the HTML tree.
 
         Args:
             tree: Parsed HTML tree
             field_config: Configuration for the field to extract
+            url: Source URL for error context
 
         Returns:
             Extracted and coerced value
@@ -97,7 +100,7 @@ class SchemaExtractor:
         nodes = tree.css(field_config.selector)
 
         if not nodes:
-            return self._handle_no_match(field_config)
+            return self._handle_no_match(field_config, url)
 
         if field_config.is_nested_model:
             return self._extract_nested(nodes, field_config)
@@ -105,13 +108,14 @@ class SchemaExtractor:
         if field_config.is_list:
             return self._extract_list(nodes, field_config)
         else:
-            return self._extract_single(nodes[0], field_config)
+            return self._extract_single(nodes[0], field_config, url)
 
-    def _handle_no_match(self, field_config: FieldConfig) -> Any:
+    def _handle_no_match(self, field_config: FieldConfig, url: str = "") -> Any:
         """Handle case where selector matches no elements.
 
         Args:
             field_config: Configuration for the field
+            url: Source URL for error context
 
         Returns:
             Default value for optional/list fields
@@ -129,23 +133,28 @@ class SchemaExtractor:
         if field_config.is_optional:
             return None
         # Required field with no match - raise error
+        url_context = f" (url: {url})" if url else ""
         raise ExtractionError(
-            f"Required field '{field_config.name}' not found with selector: {field_config.selector}"
+            f"Required field '{field_config.name}' not found with "
+            f"selector: {field_config.selector}{url_context}"
         )
 
-    def _extract_single(self, node: Node, field_config: FieldConfig) -> Any:
+    def _extract_single(
+        self, node: Node, field_config: FieldConfig, url: str = ""
+    ) -> Any:
         """Extract value from a single node.
 
         Args:
             node: HTML node to extract from
             field_config: Configuration for the field
+            url: Source URL for error context
 
         Returns:
             Extracted and coerced value
         """
         raw_value = self._get_node_value(node, field_config.attr)
         if raw_value is None:
-            return self._handle_no_match(field_config)
+            return self._handle_no_match(field_config, url)
 
         try:
             return TypeCoercer.coerce(
@@ -158,8 +167,9 @@ class SchemaExtractor:
                     if field_config.default is not ...
                     else None
                 )
+            url_context = f" (url: {url})" if url else ""
             raise ExtractionError(
-                f"Failed to coerce field '{field_config.name}': {e}"
+                f"Failed to coerce field '{field_config.name}': {e}{url_context}"
             ) from e
 
     def _extract_list(self, nodes: list[Node], field_config: FieldConfig) -> list[Any]:

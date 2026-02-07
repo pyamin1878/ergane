@@ -1,5 +1,6 @@
 """SQLite-based response caching for development and debugging."""
 
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -33,6 +34,7 @@ class ResponseCache:
         self.ttl = timedelta(seconds=ttl_seconds)
         self.db_path = cache_dir / "response_cache.db"
         self._init_db()
+        self._cleanup_expired_sync()
 
     def _init_db(self) -> None:
         """Initialize the SQLite database."""
@@ -56,15 +58,8 @@ class ResponseCache:
         """Generate a SHA-256 hash of the URL."""
         return hashlib.sha256(url.encode()).hexdigest()
 
-    async def get(self, url: str) -> CacheEntry | None:
-        """Retrieve a cached response if it exists and hasn't expired.
-
-        Args:
-            url: The URL to look up.
-
-        Returns:
-            CacheEntry if found and valid, None otherwise.
-        """
+    def _get_sync(self, url: str) -> CacheEntry | None:
+        """Synchronous cache lookup (runs in thread pool)."""
         url_hash = self._hash_url(url)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -81,8 +76,8 @@ class ResponseCache:
 
         cached_at = datetime.fromisoformat(row[4])
         if datetime.now(timezone.utc) - cached_at > self.ttl:
-            # Entry has expired
-            await self.delete(url)
+            # Entry has expired — delete inline
+            self._delete_sync(url)
             return None
 
         return CacheEntry(
@@ -92,6 +87,53 @@ class ResponseCache:
             headers=json.loads(row[3]),
             cached_at=cached_at,
         )
+
+    def _set_sync(
+        self, url: str, status_code: int, content: str, headers_json: str
+    ) -> None:
+        """Synchronous cache write (runs in thread pool)."""
+        url_hash = self._hash_url(url)
+        cached_at = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO responses
+                (url_hash, url, status_code, content, headers, cached_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (url_hash, url, status_code, content, headers_json, cached_at),
+            )
+
+    def _delete_sync(self, url: str) -> None:
+        """Synchronous cache delete (runs in thread pool)."""
+        url_hash = self._hash_url(url)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM responses WHERE url_hash = ?", (url_hash,))
+
+    def _clear_sync(self) -> None:
+        """Synchronous cache clear (runs in thread pool)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM responses")
+
+    def _cleanup_expired_sync(self) -> int:
+        """Synchronous expired entry cleanup (runs in thread pool or at init)."""
+        cutoff = (datetime.now(timezone.utc) - self.ttl).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM responses WHERE cached_at < ?", (cutoff,)
+            )
+            return cursor.rowcount
+
+    async def get(self, url: str) -> CacheEntry | None:
+        """Retrieve a cached response if it exists and hasn't expired.
+
+        Args:
+            url: The URL to look up.
+
+        Returns:
+            CacheEntry if found and valid, None otherwise.
+        """
+        return await asyncio.to_thread(self._get_sync, url)
 
     async def set(
         self, url: str, status_code: int, content: str, headers: dict[str, str]
@@ -104,19 +146,8 @@ class ResponseCache:
             content: Response body content.
             headers: Response headers.
         """
-        url_hash = self._hash_url(url)
-        cached_at = datetime.now(timezone.utc).isoformat()
         headers_json = json.dumps(headers)
-
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO responses
-                (url_hash, url, status_code, content, headers, cached_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (url_hash, url, status_code, content, headers_json, cached_at),
-            )
+        await asyncio.to_thread(self._set_sync, url, status_code, content, headers_json)
 
     async def delete(self, url: str) -> None:
         """Delete a cached entry.
@@ -124,14 +155,11 @@ class ResponseCache:
         Args:
             url: The URL to delete from cache.
         """
-        url_hash = self._hash_url(url)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM responses WHERE url_hash = ?", (url_hash,))
+        await asyncio.to_thread(self._delete_sync, url)
 
     async def clear(self) -> None:
         """Clear all cached responses."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM responses")
+        await asyncio.to_thread(self._clear_sync)
 
     async def cleanup_expired(self) -> int:
         """Remove all expired entries from the cache.
@@ -139,12 +167,7 @@ class ResponseCache:
         Returns:
             Number of entries removed.
         """
-        cutoff = (datetime.now(timezone.utc) - self.ttl).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM responses WHERE cached_at < ?", (cutoff,)
-            )
-            return cursor.rowcount
+        return await asyncio.to_thread(self._cleanup_expired_sync)
 
     def stats(self) -> dict[str, int]:
         """Get cache statistics.
