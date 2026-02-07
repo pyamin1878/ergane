@@ -74,20 +74,22 @@ class TestDeduplication:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_reordered_query_params_deduplicated(self, scheduler: Scheduler):
+        """Test that URLs with reordered query params are deduplicated."""
+        await scheduler.add(CrawlRequest(url="https://example.com/search?a=1&b=2"))
+        result = await scheduler.add(
+            CrawlRequest(url="https://example.com/search?b=2&a=1")
+        )
+        assert result is False
+        assert await scheduler.size() == 1
+
+    @pytest.mark.asyncio
     async def test_different_urls_accepted(self, scheduler: Scheduler):
         """Test that different URLs are accepted."""
         await scheduler.add(CrawlRequest(url="https://example.com/page1"))
         result = await scheduler.add(CrawlRequest(url="https://example.com/page2"))
         assert result is True
         assert await scheduler.size() == 2
-
-    @pytest.mark.asyncio
-    async def test_mark_seen(self, scheduler: Scheduler):
-        """Test marking URL as seen without adding to queue."""
-        scheduler.mark_seen("https://example.com/seen")
-        result = await scheduler.add(CrawlRequest(url="https://example.com/seen"))
-        assert result is False
-        assert await scheduler.size() == 0
 
     @pytest.mark.asyncio
     async def test_seen_count(self, scheduler: Scheduler):

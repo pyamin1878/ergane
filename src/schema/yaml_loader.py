@@ -97,6 +97,39 @@ def _create_field(field_config: dict[str, Any]) -> tuple[Type[Any], FieldInfo]:
     return annotation, field_info
 
 
+def _build_model_from_config(config: dict) -> Type[BaseModel]:
+    """Build a Pydantic model from a parsed YAML config dict.
+
+    Args:
+        config: Parsed YAML dictionary with 'name' and 'fields' keys.
+
+    Returns:
+        Dynamically created Pydantic model class.
+
+    Raises:
+        SchemaLoadError: If config is missing required keys or fields are invalid.
+    """
+    model_name = config.get("name", "DynamicSchema")
+
+    fields_config = config.get("fields")
+    if not fields_config or not isinstance(fields_config, dict):
+        raise SchemaLoadError("YAML must have a 'fields' dictionary")
+
+    field_definitions: dict[str, tuple[Type[Any], Any]] = {}
+    field_definitions["url"] = (str, ...)
+    field_definitions["crawled_at"] = (datetime, ...)
+
+    for field_name, field_cfg in fields_config.items():
+        if not isinstance(field_cfg, dict):
+            raise SchemaLoadError(
+                f"Field '{field_name}' must be a dictionary, got {type(field_cfg)}"
+            )
+        annotation, field_info = _create_field(field_cfg)
+        field_definitions[field_name] = (annotation, field_info)
+
+    return create_model(model_name, **field_definitions)
+
+
 def load_schema_from_yaml(path: str | Path) -> Type[BaseModel]:
     """Load a Pydantic model from a YAML schema definition.
 
@@ -145,32 +178,7 @@ def load_schema_from_yaml(path: str | Path) -> Type[BaseModel]:
     if not isinstance(config, dict):
         raise SchemaLoadError("YAML must be a dictionary")
 
-    # Get model name
-    model_name = config.get("name", "DynamicSchema")
-
-    # Get fields
-    fields_config = config.get("fields")
-    if not fields_config or not isinstance(fields_config, dict):
-        raise SchemaLoadError("YAML must have a 'fields' dictionary")
-
-    # Build field definitions
-    field_definitions: dict[str, tuple[Type[Any], Any]] = {}
-
-    # Add auto-populated fields
-    field_definitions["url"] = (str, ...)
-    field_definitions["crawled_at"] = (datetime, ...)
-
-    # Add user-defined fields
-    for field_name, field_config in fields_config.items():
-        if not isinstance(field_config, dict):
-            raise SchemaLoadError(
-                f"Field '{field_name}' must be a dictionary, got {type(field_config)}"
-            )
-        annotation, field_info = _create_field(field_config)
-        field_definitions[field_name] = (annotation, field_info)
-
-    # Create model
-    return create_model(model_name, **field_definitions)
+    return _build_model_from_config(config)
 
 
 def load_schema_from_string(yaml_content: str) -> Type[BaseModel]:
@@ -193,23 +201,4 @@ def load_schema_from_string(yaml_content: str) -> Type[BaseModel]:
     if not isinstance(config, dict):
         raise SchemaLoadError("YAML must be a dictionary")
 
-    # Reuse file loading logic by writing to temp config
-    model_name = config.get("name", "DynamicSchema")
-    fields_config = config.get("fields")
-
-    if not fields_config or not isinstance(fields_config, dict):
-        raise SchemaLoadError("YAML must have a 'fields' dictionary")
-
-    field_definitions: dict[str, tuple[Type[Any], Any]] = {}
-    field_definitions["url"] = (str, ...)
-    field_definitions["crawled_at"] = (datetime, ...)
-
-    for field_name, field_config in fields_config.items():
-        if not isinstance(field_config, dict):
-            raise SchemaLoadError(
-                f"Field '{field_name}' must be a dictionary, got {type(field_config)}"
-            )
-        annotation, field_info = _create_field(field_config)
-        field_definitions[field_name] = (annotation, field_info)
-
-    return create_model(model_name, **field_definitions)
+    return _build_model_from_config(config)

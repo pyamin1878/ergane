@@ -121,6 +121,9 @@ class Crawler:
                     self._pages_crawled += 1
                     current_count = self._pages_crawled
 
+                if response.error:
+                    self._logger.warning(f"Fetch error for {request.url}: {response.error}")
+
                 if response.status_code == 200 and response.content:
                     # Use custom schema or legacy ParsedItem
                     if self.output_schema is not None:
