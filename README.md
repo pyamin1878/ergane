@@ -64,42 +64,76 @@ ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 
 ## Architecture
 
-Ergane uses an async pipeline architecture with four stages running concurrently:
+Ergane uses an async pipeline architecture orchestrated by a central **Crawler** engine. N worker coroutines run concurrently, each pulling URLs from the scheduler, fetching, parsing, and feeding results to the output pipeline.
 
 ```
-                          ┌─────────────┐
-                          │  Start URLs  │
-                          └──────┬───────┘
-                                 │
-                                 ▼
-┌──────────────────────────────────────────────────────┐
-│                     Scheduler                        │
-│  Priority queue with URL deduplication & depth limit │
-└──────────────┬───────────────────────────────────────┘
-               │  get_nowait()
-               ▼
-┌──────────────────────────────────────────────────────┐
-│               Fetcher  (N async workers)             │
-│  HTTP/2 client · per-domain rate limiting            │
-│  retry with backoff · robots.txt · response cache    │
-└──────────────┬───────────────────────────────────────┘
-               │  CrawlResponse
-               ▼
-┌──────────────────────────────────────────────────────┐
-│                      Parser                          │
-│  selectolax HTML → ParsedItem or typed Pydantic model│
-│  link extraction for scheduling new URLs             │
-└──────────────┬───────────────────────────────────────┘
-               │  BaseModel instance
-               ▼
-┌──────────────────────────────────────────────────────┐
-│                     Pipeline                         │
-│  Batched writes (O(1) per batch) · Parquet/CSV/Excel │
-│  URL deduplication on consolidate                    │
-└──────────────────────────────────────────────────────┘
-```
+  CLI args ──→ Config ←── YAML file          Presets / Custom Schema
+               merge       (~/.ergane.yaml)       │
+                 │                                 │
+                 ▼                                 ▼
+          ┌─────────────────────────────────────────────────────────────┐
+          │                     Crawler  (engine)                       │
+          │  Spawns N async workers · signal handling · progress bar    │
+          │                                                             │
+          │  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ Worker loop (× N) ─ ─ ─ ─ ─ ─ ─ ┐  │
+          │                                                             │
+          │  │   ┌───────────────────────────────────────────────┐  │  │
+          │      │              Scheduler                        │     │
+          │  │   │  Min-heap priority queue · URL dedup (set)   │  │  │
+          │      │  Depth limit · asyncio.Event signaling        │     │
+          │  │   └──────────────┬────────────────────────────────┘  │  │
+          │                     │ get_nowait() → CrawlRequest            │
+          │  │                  ▼                                   │  │
+          │      ┌──────────────────────────────────────────────┐     │
+          │  │   │              Fetcher                          │  │  │
+          │      │  httpx AsyncClient (HTTP/2) · proxy support  │     │
+          │  │   │  Per-domain token-bucket rate limiter         │  │  │
+          │      │  Exponential backoff retry · robots.txt      │     │
+          │  │   └──────┬───────────────────────────────────────┘  │  │
+          │             │ CrawlResponse                               │
+          │  │          ▼                                           │  │
+          │      ┌──────────────────────────────────────────────┐     │
+          │  │   │              Parser                           │  │  │
+          │      │  selectolax HTML parsing (16× BeautifulSoup) │     │
+          │  │   │  Schema mode → typed Pydantic model          │  │  │
+          │      │  Legacy mode → ParsedItem                    │     │
+          │  │   │  Link extraction ─────────────────────┐      │  │  │
+          │      └──────┬───────────────────────────────┐│──────┘     │
+          │  │          │ model instance                 ││ new URLs│  │
+          │             ▼                               │▼            │
+          │  │   ┌────────────────────┐        ┌────────────────┐  │  │
+          │      │     Pipeline       │        │   Scheduler    │     │
+          │  │   │  Buffer → batch    │        │   .add_many()  │  │  │
+          │      │  files (numbered)  │        └────────────────┘     │
+          │  │   └────────┬───────────┘                            │  │
+          │               │                                           │
+          │  └ ─ ─ ─ ─ ─ ┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  │
+          │               │                                            │
+          └───────────────┼────────────────────────────────────────────┘
+                          │ flush on batch_size
+                          ▼
+          ┌──────────────────────────────────────────────────────────┐
+          │                   Pipeline  (output)                     │
+          │  Incremental batch files → consolidate & dedup by URL   │
+          │  Parquet · CSV · Excel  (via Polars)                    │
+          └──────────────────────────────┬───────────────────────────┘
+                                         │
+                                         ▼
+                                   output.parquet
 
-A **Checkpoint** system periodically snapshots the scheduler state and page count so crawls can be resumed after interruption.
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                      Cross-cutting concerns                      │
+  │                                                                  │
+  │  Checkpoint ─ periodic JSON snapshots of scheduler state &       │
+  │               page count; enables --resume after interruption    │
+  │                                                                  │
+  │  Cache ───── optional SQLite response cache with TTL             │
+  │               (SHA-256 URL keys · non-blocking async I/O)        │
+  │                                                                  │
+  │  Schema ──── YAML loader → dynamic Pydantic model creation       │
+  │               type coercion ($19.99→19.99) · Parquet type mapping │
+  └──────────────────────────────────────────────────────────────────┘
+```
 
 ## CLI Options
 
