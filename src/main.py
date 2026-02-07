@@ -16,7 +16,7 @@ from rich.progress import (
 )
 
 from src.config import load_config, merge_config
-from src.crawler import Fetcher, Pipeline, Scheduler, extract_data, extract_typed_data
+from src.crawler import Fetcher, Pipeline, Scheduler, extract_data, extract_links, extract_typed_data
 from src.crawler.checkpoint import (
     CHECKPOINT_FILE,
     CrawlerCheckpoint,
@@ -129,23 +129,17 @@ class Crawler:
                             await pipeline.add(item)
                         except ExtractionError as e:
                             self._logger.error(f"Extraction error: {e}")
-                            # Fall back to legacy extraction for links
-                            legacy_item = extract_data(response)
-                            links = legacy_item.links
                     else:
                         item = extract_data(response)
                         await pipeline.add(item)
-                        links = item.links
 
-                    # Queue new URLs (only from legacy extraction or if schema didn't fail)
+                    # Queue discovered links
                     if request.depth < self.max_depth:
-                        # Get links for scheduling
                         if self.output_schema is None:
-                            pass  # links already set
+                            links = item.links
                         else:
-                            # Extract links separately for custom schemas
-                            legacy_item = extract_data(response)
-                            links = legacy_item.links
+                            # Lightweight link-only parse (no title/text/selectors)
+                            links = extract_links(response.content, response.url)
 
                         new_requests = []
                         for link in links:
