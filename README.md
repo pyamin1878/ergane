@@ -14,7 +14,7 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 - **Fast Parsing** - Selectolax HTML parsing (16x faster than BeautifulSoup)
 - **Built-in Presets** - Pre-configured schemas for popular sites (no coding required)
 - **Custom Schemas** - Define Pydantic models with CSS selectors and type coercion
-- **Multi-Format Output** - Export to CSV, Excel, or Parquet with native types
+- **Multi-Format Output** - Export to CSV, Excel, Parquet, JSON, JSONL, or SQLite
 - **Response Caching** - SQLite-based caching for faster development and debugging
 - **Production Ready** - robots.txt compliance, graceful shutdown, checkpoints, proxy support
 
@@ -115,7 +115,7 @@ Ergane uses an async pipeline architecture orchestrated by a central **Crawler**
           ┌──────────────────────────────────────────────────────────┐
           │                   Pipeline  (output)                     │
           │  Incremental batch files → consolidate & dedup by URL   │
-          │  Parquet · CSV · Excel  (via Polars)                    │
+          │  Parquet · CSV · Excel · JSON · JSONL · SQLite           │
           └──────────────────────────────┬───────────────────────────┘
                                          │
                                          ▼
@@ -149,7 +149,7 @@ Common options:
 | `--rate-limit` | `-r` | `10.0` | Requests per second per domain |
 | `--schema` | `-s` | none | YAML schema file for custom extraction |
 | `--preset` | `-p` | none | Use a built-in preset |
-| `--format` | `-f` | `auto` | Output format: `csv`, `excel`, `parquet` |
+| `--format` | `-f` | `auto` | Output format: `csv`, `excel`, `parquet`, `json`, `jsonl`, `sqlite` |
 | `--cache` | | `false` | Enable response caching |
 | `--cache-dir` | | `.ergane_cache` | Cache directory |
 | `--cache-ttl` | | `3600` | Cache TTL in seconds |
@@ -213,6 +213,15 @@ Output format is auto-detected from file extension:
 ergane --preset quotes -o quotes.csv      # CSV
 ergane --preset quotes -o quotes.xlsx     # Excel
 ergane --preset quotes -o quotes.parquet  # Parquet (default)
+ergane --preset quotes -o quotes.json     # JSON array
+ergane --preset quotes -o quotes.jsonl    # JSONL (one object per line)
+ergane --preset quotes -o quotes.sqlite   # SQLite database
+```
+
+You can also force a format with `--format`/`-f` regardless of file extension:
+
+```bash
+ergane --preset quotes -f jsonl -o output.dat
 ```
 
 ```python
