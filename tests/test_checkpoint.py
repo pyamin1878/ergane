@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -111,3 +112,30 @@ def test_create_checkpoint():
     assert len(checkpoint.pending_queue) == 1
     assert checkpoint.batch_number == 1
     assert checkpoint.timestamp  # Should have a timestamp
+
+
+def test_failed_save_preserves_original(
+    checkpoint_path: Path, sample_checkpoint: CrawlerCheckpoint
+):
+    """Test that a crash during save preserves the original checkpoint file."""
+    # Write an initial valid checkpoint
+    save_checkpoint(checkpoint_path, sample_checkpoint)
+    original_data = checkpoint_path.read_text()
+
+    # Simulate a crash during json.dump by making it raise
+    with patch("src.crawler.checkpoint.json.dump", side_effect=OSError("disk full")):
+        with pytest.raises(OSError, match="disk full"):
+            modified = CrawlerCheckpoint(
+                pages_crawled=999,
+                seen_urls=["https://corrupted.com"],
+                pending_queue=[],
+                batch_number=99,
+                timestamp="2026-01-26T13:00:00+00:00",
+            )
+            save_checkpoint(checkpoint_path, modified)
+
+    # Original file should be untouched
+    assert checkpoint_path.read_text() == original_data
+    loaded = load_checkpoint(checkpoint_path)
+    assert loaded is not None
+    assert loaded.pages_crawled == 50

@@ -1,6 +1,6 @@
 import asyncio
 import heapq
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from src.models import CrawlConfig, CrawlRequest
 
@@ -31,7 +31,8 @@ class Scheduler:
         parsed = urlparse(url)
         normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
         if parsed.query:
-            normalized += f"?{parsed.query}"
+            sorted_query = urlencode(sorted(parse_qsl(parsed.query)))
+            normalized += f"?{sorted_query}"
         return normalized.rstrip("/").lower()
 
     async def add(self, request: CrawlRequest) -> bool:
@@ -101,11 +102,6 @@ class Scheduler:
         """Check if queue is empty."""
         async with self._lock:
             return len(self._queue) == 0
-
-    def mark_seen(self, url: str) -> None:
-        """Mark a URL as seen without adding to queue."""
-        normalized = self._normalize_url(url)
-        self._seen.add(normalized)
 
     def get_state(self) -> dict:
         """Export scheduler state for checkpointing.

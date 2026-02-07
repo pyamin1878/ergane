@@ -20,18 +20,21 @@ class TokenBucket:
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self.last_update
-            self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
-            self.last_update = now
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                elapsed = now - self.last_update
+                self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+                self.last_update = now
 
-            if self.tokens < 1:
+                if self.tokens >= 1:
+                    self.tokens -= 1
+                    return
+
                 wait_time = (1 - self.tokens) / self.rate
-                await asyncio.sleep(wait_time)
-                self.tokens = 0
-            else:
-                self.tokens -= 1
+
+            # Sleep OUTSIDE the lock so other workers aren't blocked
+            await asyncio.sleep(wait_time)
 
 
 class Fetcher:

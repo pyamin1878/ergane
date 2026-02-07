@@ -1,6 +1,7 @@
 """Checkpoint save/load for resume functionality."""
 
 import json
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,14 +21,24 @@ class CrawlerCheckpoint:
 
 
 def save_checkpoint(path: Path, checkpoint: CrawlerCheckpoint) -> None:
-    """Save checkpoint to JSON file.
+    """Save checkpoint to JSON file atomically.
+
+    Writes to a temp file first, then atomically replaces the target.
+    This prevents corruption if a crash occurs during the write.
 
     Args:
         path: File path for checkpoint.
         checkpoint: Crawler state to save.
     """
-    with open(path, "w") as f:
-        json.dump(asdict(checkpoint), f, indent=2)
+    path = Path(path)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with open(fd, "w") as f:
+            json.dump(asdict(checkpoint), f, indent=2)
+        Path(tmp_path).replace(path)
+    except BaseException:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
 
 
 def load_checkpoint(path: Path) -> CrawlerCheckpoint | None:

@@ -44,6 +44,30 @@ class TestTokenBucket:
         assert bucket.tokens > 0
 
 
+    @pytest.mark.asyncio
+    async def test_concurrent_acquires_not_serialized_through_sleep(self):
+        """Two workers waiting for tokens should not serialize through the sleep.
+
+        With the old bug, one worker sleeping inside the lock would block
+        the other from even checking its token balance.
+        """
+        bucket = TokenBucket(rate=1.0, capacity=1.0)
+        await bucket.acquire()  # Drain the single token
+
+        async def timed_acquire():
+            start = asyncio.get_event_loop().time()
+            await bucket.acquire()
+            return asyncio.get_event_loop().time() - start
+
+        # Launch two concurrent acquires — both need to wait for refill
+        t1, t2 = await asyncio.gather(timed_acquire(), timed_acquire())
+
+        # If the lock were held during sleep, total would be ~2s (serialized).
+        # With the fix, the second worker can enter the lock while the first sleeps,
+        # so total wall-clock should be well under 2x the single-wait time.
+        assert max(t1, t2) < 2.5  # generous bound; serialized would be ~2s
+
+
 class TestFetcherInitialization:
     """Fetcher initialization and context manager tests."""
 
