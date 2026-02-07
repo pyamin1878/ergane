@@ -295,7 +295,7 @@ class Crawler:
 )
 @click.option(
     "--output", "-o", default="output.parquet",
-    help="Output file path (.parquet, .csv, .xlsx).",
+    help="Output file path (.parquet, .csv, .xlsx, .json, .jsonl, .sqlite).",
 )
 @click.option(
     "--max-pages", "-n", default=None, type=int,
@@ -335,7 +335,7 @@ class Crawler:
     "--format",
     "-f",
     "output_format",
-    type=click.Choice(["auto", "csv", "excel", "parquet"]),
+    type=click.Choice(["auto", "csv", "excel", "parquet", "json", "jsonl", "sqlite"]),
     default=None,
     help="Output format (auto-detects from file extension)",
 )

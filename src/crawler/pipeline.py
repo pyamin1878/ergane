@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any, Literal, Type, TypeVar
 
@@ -11,7 +12,7 @@ from src.schema import ParquetSchemaMapper
 
 T = TypeVar("T", bound=BaseModel)
 
-OutputFormat = Literal["parquet", "csv", "excel", "auto"]
+OutputFormat = Literal["parquet", "csv", "excel", "json", "jsonl", "sqlite", "auto"]
 
 
 class Pipeline:
@@ -29,6 +30,9 @@ class Pipeline:
     - parquet: Efficient columnar storage (default)
     - csv: Universal text format, widely compatible
     - excel: .xlsx format for spreadsheet applications
+    - json: JSON array format for APIs/web
+    - jsonl: Newline-delimited JSON for streaming pipelines
+    - sqlite: SQLite database for querying/sharing
     """
 
     EXTENSION_MAP = {
@@ -36,6 +40,11 @@ class Pipeline:
         ".csv": "csv",
         ".xlsx": "excel",
         ".xls": "excel",
+        ".json": "json",
+        ".jsonl": "jsonl",
+        ".ndjson": "jsonl",
+        ".sqlite": "sqlite",
+        ".db": "sqlite",
     }
 
     def __init__(
@@ -73,6 +82,9 @@ class Pipeline:
             "parquet": ".parquet",
             "csv": ".csv",
             "excel": ".xlsx",
+            "json": ".jsonl",
+            "jsonl": ".jsonl",
+            "sqlite": ".jsonl",
         }
         return format_extensions.get(self.output_format, ".parquet")
 
@@ -123,6 +135,8 @@ class Pipeline:
             self._write_csv(df, path)
         elif self.output_format == "excel":
             self._write_excel(df, path)
+        elif self.output_format in ("json", "jsonl", "sqlite"):
+            self._write_jsonl(df, path)
         else:
             df.write_parquet(path)
 
@@ -133,6 +147,46 @@ class Pipeline:
     def _write_excel(self, df: pl.DataFrame, path: Path) -> None:
         """Write DataFrame to Excel file."""
         df.write_excel(path)
+
+    def _write_jsonl(self, df: pl.DataFrame, path: Path) -> None:
+        """Write DataFrame to JSONL (newline-delimited JSON) file."""
+        df.write_ndjson(path)
+
+    def _write_json(self, df: pl.DataFrame, path: Path) -> None:
+        """Write DataFrame to JSON array file."""
+        df.write_json(path)
+
+    def _write_sqlite(self, df: pl.DataFrame, path: Path) -> None:
+        """Write DataFrame to SQLite database file."""
+        table_name = path.stem
+        rows = df.to_dicts()
+        if not rows:
+            return
+        columns = list(rows[0].keys())
+        col_defs = ", ".join(f'"{c}" TEXT' for c in columns)
+        placeholders = ", ".join("?" for _ in columns)
+        col_names = ", ".join(f'"{c}"' for c in columns)
+        with sqlite3.connect(path) as conn:
+            conn.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})')
+            conn.executemany(
+                f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})',
+                [[str(row.get(c, "")) for c in columns] for row in rows],
+            )
+
+    def _write_final(self, df: pl.DataFrame, path: Path) -> None:
+        """Write the final consolidated output in the target format.
+
+        For json/sqlite, batch files are JSONL but the final output must be
+        converted to the correct format.
+        """
+        if self.output_format == "json":
+            self._write_json(df, path)
+        elif self.output_format == "jsonl":
+            self._write_jsonl(df, path)
+        elif self.output_format == "sqlite":
+            self._write_sqlite(df, path)
+        else:
+            self._write_dataframe(df, path)
 
     def _create_legacy_dataframe(self, items: list[BaseModel]) -> pl.DataFrame:
         """Create DataFrame for legacy ParsedItem mode with JSON strings.
@@ -192,7 +246,7 @@ class Pipeline:
         if not batch_files:
             return self.output_path
 
-        if len(batch_files) == 1:
+        if len(batch_files) == 1 and self.output_format not in ("json", "sqlite"):
             # Just rename the single batch file
             batch_files[0].rename(self.output_path)
             return self.output_path
@@ -207,7 +261,7 @@ class Pipeline:
                 subset=["url"], keep="last"
             )
 
-        self._write_dataframe(combined, self.output_path)
+        self._write_final(combined, self.output_path)
 
         # Clean up batch files
         for f in batch_files:
@@ -221,6 +275,8 @@ class Pipeline:
             return pl.read_csv(path)
         elif self.output_format == "excel":
             return pl.read_excel(path)
+        elif self.output_format in ("json", "jsonl", "sqlite"):
+            return pl.read_ndjson(path)
         else:
             return pl.read_parquet(path)
 
