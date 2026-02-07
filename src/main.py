@@ -283,15 +283,42 @@ class Crawler:
 
 
 @click.command()
-@click.option("--url", "-u", multiple=True, help="Start URL(s)")
-@click.option("--output", "-o", default="output.parquet", help="Output file path")
-@click.option("--max-pages", "-n", default=None, type=int, help="Maximum pages to crawl")
-@click.option("--max-depth", "-d", default=None, type=int, help="Maximum crawl depth")
-@click.option("--concurrency", "-c", default=None, type=int, help="Concurrent requests")
-@click.option("--rate-limit", "-r", default=None, type=float, help="Requests per second per domain")
-@click.option("--timeout", "-t", default=None, type=float, help="Request timeout in seconds")
-@click.option("--same-domain/--any-domain", default=None, help="Stay on same domain")
-@click.option("--ignore-robots", is_flag=True, default=None, help="Ignore robots.txt")
+@click.option(
+    "--url", "-u", multiple=True,
+    help="Start URL(s) to crawl. Repeat for multiple.",
+)
+@click.option(
+    "--output", "-o", default="output.parquet",
+    help="Output file path (.parquet, .csv, .xlsx).",
+)
+@click.option(
+    "--max-pages", "-n", default=None, type=int,
+    help="Maximum pages to crawl (default: 100).",
+)
+@click.option(
+    "--max-depth", "-d", default=None, type=int,
+    help="Maximum link-follow depth (default: 3). 0 = seed only.",
+)
+@click.option(
+    "--concurrency", "-c", default=None, type=int,
+    help="Concurrent requests (default: 10).",
+)
+@click.option(
+    "--rate-limit", "-r", default=None, type=float,
+    help="Max requests/sec per domain (default: 10).",
+)
+@click.option(
+    "--timeout", "-t", default=None, type=float,
+    help="Request timeout in seconds (default: 30).",
+)
+@click.option(
+    "--same-domain/--any-domain", default=None,
+    help="Restrict to same domain (default) or allow cross-domain.",
+)
+@click.option(
+    "--ignore-robots", is_flag=True, default=None,
+    help="Ignore robots.txt restrictions.",
+)
 @click.option(
     "--schema",
     "-s",
@@ -398,12 +425,28 @@ def main(
 ) -> None:
     """Ergane - High-performance async web scraper.
 
-    Use presets for common sites:
-        ergane --preset quotes -o quotes.csv
-        ergane --preset hacker-news -o stories.xlsx
+    \b
+    Presets (no schema needed):
+      ergane --preset quotes -o quotes.csv
+      ergane --preset hacker-news -o stories.xlsx -n 200
+      ergane --list-presets            # show all presets
 
-    Or specify URLs directly:
-        ergane -u https://example.com -o data.parquet
+    \b
+    Custom URLs:
+      ergane -u https://example.com -o data.parquet
+      ergane -u https://a.com -u https://b.com -n 50
+
+    \b
+    Custom schema:
+      ergane -u https://shop.com -s schema.yaml -o items.csv
+
+    \b
+    Caching (instant reruns during development):
+      ergane --preset quotes --cache -n 10 -o quotes.csv
+
+    \b
+    Resume an interrupted crawl:
+      ergane -u https://example.com -n 1000 --resume
     """
     # Handle --list-presets
     if list_presets:

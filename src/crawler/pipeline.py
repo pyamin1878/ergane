@@ -200,6 +200,13 @@ class Pipeline:
         # Read and concatenate all batch files
         dfs = [self._read_batch_file(f) for f in batch_files]
         combined = pl.concat(dfs)
+
+        # Deduplicate by URL, keeping the last occurrence
+        if "url" in combined.columns:
+            combined = combined.unique(
+                subset=["url"], keep="last"
+            )
+
         self._write_dataframe(combined, self.output_path)
 
         # Clean up batch files

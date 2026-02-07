@@ -62,6 +62,45 @@ ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 | `wikipedia-articles` | en.wikipedia.org | title, link |
 | `bbc-news` | bbc.com/news | title, summary, link |
 
+## Architecture
+
+Ergane uses an async pipeline architecture with four stages running concurrently:
+
+```
+                          ┌─────────────┐
+                          │  Start URLs  │
+                          └──────┬───────┘
+                                 │
+                                 ▼
+┌──────────────────────────────────────────────────────┐
+│                     Scheduler                        │
+│  Priority queue with URL deduplication & depth limit │
+└──────────────┬───────────────────────────────────────┘
+               │  get_nowait()
+               ▼
+┌──────────────────────────────────────────────────────┐
+│               Fetcher  (N async workers)             │
+│  HTTP/2 client · per-domain rate limiting            │
+│  retry with backoff · robots.txt · response cache    │
+└──────────────┬───────────────────────────────────────┘
+               │  CrawlResponse
+               ▼
+┌──────────────────────────────────────────────────────┐
+│                      Parser                          │
+│  selectolax HTML → ParsedItem or typed Pydantic model│
+│  link extraction for scheduling new URLs             │
+└──────────────┬───────────────────────────────────────┘
+               │  BaseModel instance
+               ▼
+┌──────────────────────────────────────────────────────┐
+│                     Pipeline                         │
+│  Batched writes (O(1) per batch) · Parquet/CSV/Excel │
+│  URL deduplication on consolidate                    │
+└──────────────────────────────────────────────────────┘
+```
+
+A **Checkpoint** system periodically snapshots the scheduler state and page count so crawls can be resumed after interruption.
+
 ## CLI Options
 
 Common options:
@@ -146,6 +185,78 @@ ergane --preset quotes -o quotes.parquet  # Parquet (default)
 import polars as pl
 df = pl.read_parquet("output.parquet")
 ```
+
+## Advanced CLI Examples
+
+```bash
+# Crawl with a proxy
+ergane -u https://example.com -o data.csv --proxy http://localhost:8080
+
+# Resume an interrupted crawl (requires prior checkpoint)
+ergane -u https://example.com -n 500 --resume
+
+# Save checkpoints every 50 pages with debug logging
+ergane -u https://example.com -n 500 --checkpoint-interval 50 \
+    --log-level DEBUG --log-file crawl.log
+
+# Use a YAML config file and override concurrency from CLI
+ergane -u https://example.com -C config.yaml -c 20
+
+# Combine preset with custom URL and explicit format
+ergane --preset hacker-news -u https://news.ycombinator.com/newest \
+    -f csv -o newest.csv -n 200
+```
+
+## Troubleshooting
+
+### Getting empty or partial output
+
+- **Check `--max-depth`**: depth 0 means only the seed URL is crawled.
+  Increase with `-d 3` to follow links.
+- **Same-domain filtering**: by default Ergane only follows links on the
+  same domain as the seed URL. Use `--any-domain` to crawl cross-domain.
+- **Selector mismatch**: if using a custom schema, verify your CSS
+  selectors match the actual site HTML (sites change frequently).
+
+### Blocked by robots.txt
+
+If a target site disallows your user-agent in `robots.txt`, Ergane will
+return 403 for those URLs. Options:
+
+```bash
+# Ignore robots.txt (use responsibly)
+ergane -u https://example.com --ignore-robots -o data.csv
+```
+
+### Rate limiting or 429 responses
+
+Lower the request rate and concurrency:
+
+```bash
+ergane -u https://example.com -r 2 -c 3 -o data.csv
+```
+
+The built-in per-domain token-bucket rate limiter (`-r`) controls requests
+per second. Reducing concurrency (`-c`) also lowers overall load.
+
+### Timeouts and connection errors
+
+Increase the request timeout and enable retries (3 retries is the default):
+
+```bash
+ergane -u https://slow-site.com -t 60 -o data.csv
+```
+
+### Resuming after a crash
+
+Ergane periodically saves checkpoints (default: every 100 pages). To
+resume:
+
+```bash
+ergane -u https://example.com -n 1000 --resume
+```
+
+The checkpoint file is automatically deleted after a successful crawl.
 
 ## License
 
