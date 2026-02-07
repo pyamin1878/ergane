@@ -1,5 +1,6 @@
 import asyncio
 import signal
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Type
 from urllib.parse import urlparse
@@ -229,49 +230,45 @@ class Crawler:
                 for _ in range(self.config.max_concurrent_requests)
             ]
 
-            try:
-                # Enter progress context if enabled
-                if progress_context:
-                    self._progress = progress_context
-                    self._progress.__enter__()
-                    self._progress_task = self._progress.add_task(
-                        "Crawling",
-                        total=self.max_pages,
-                        url="",
-                        completed=self._pages_crawled,
-                    )
+            with ExitStack() as stack:
+                try:
+                    # Enter progress context if enabled
+                    if progress_context:
+                        self._progress = stack.enter_context(progress_context)
+                        self._progress_task = self._progress.add_task(
+                            "Crawling",
+                            total=self.max_pages,
+                            url="",
+                            completed=self._pages_crawled,
+                        )
 
-                last_checkpoint_count = self._pages_crawled
+                    last_checkpoint_count = self._pages_crawled
 
-                while not self._shutdown.is_set():
-                    async with self._counter_lock:
-                        if self._pages_crawled >= self.max_pages:
+                    while not self._shutdown.is_set():
+                        async with self._counter_lock:
+                            if self._pages_crawled >= self.max_pages:
+                                break
+                            active = self._active_tasks
+                            current_pages = self._pages_crawled
+
+                        if await scheduler.is_empty() and active == 0:
                             break
-                        active = self._active_tasks
-                        current_pages = self._pages_crawled
 
-                    if await scheduler.is_empty() and active == 0:
-                        break
+                        # Save checkpoint periodically
+                        if current_pages - last_checkpoint_count >= self.checkpoint_interval:
+                            await self._save_checkpoint(scheduler)
+                            last_checkpoint_count = current_pages
 
-                    # Save checkpoint periodically
-                    if current_pages - last_checkpoint_count >= self.checkpoint_interval:
-                        await self._save_checkpoint(scheduler)
-                        last_checkpoint_count = current_pages
+                        await asyncio.sleep(0.5)
 
-                    await asyncio.sleep(0.5)
+                finally:
+                    self._shutdown.set()
+                    for worker in workers:
+                        worker.cancel()
 
-            finally:
-                self._shutdown.set()
-                for worker in workers:
-                    worker.cancel()
-
-                await asyncio.gather(*workers, return_exceptions=True)
-                await pipeline.flush()
-                pipeline.consolidate()
-
-                # Exit progress context if enabled
-                if self._progress:
-                    self._progress.__exit__(None, None, None)
+                    await asyncio.gather(*workers, return_exceptions=True)
+                    await pipeline.flush()
+                    pipeline.consolidate()
                     self._progress = None
 
         # Clean up checkpoint on successful completion
