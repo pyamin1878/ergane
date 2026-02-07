@@ -16,7 +16,14 @@ from rich.progress import (
 )
 
 from src.config import load_config, merge_config
-from src.crawler import Fetcher, Pipeline, Scheduler, extract_data, extract_links, extract_typed_data
+from src.crawler import (
+    Fetcher,
+    Pipeline,
+    Scheduler,
+    extract_data,
+    extract_links,
+    extract_typed_data,
+)
 from src.crawler.checkpoint import (
     CHECKPOINT_FILE,
     CrawlerCheckpoint,
@@ -122,7 +129,9 @@ class Crawler:
                     current_count = self._pages_crawled
 
                 if response.error:
-                    self._logger.warning(f"Fetch error for {request.url}: {response.error}")
+                    self._logger.warning(
+                        f"Fetch error for {request.url}: {response.error}"
+                    )
 
                 if response.status_code == 200 and response.content:
                     # Use custom schema or legacy ParsedItem
