@@ -10,13 +10,15 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 
 ## Features
 
-- **HTTP/2 & Async** - Fast concurrent connections with rate limiting and retry logic
-- **Fast Parsing** - Selectolax HTML parsing (16x faster than BeautifulSoup)
-- **Built-in Presets** - Pre-configured schemas for popular sites (no coding required)
-- **Custom Schemas** - Define Pydantic models with CSS selectors and type coercion
-- **Multi-Format Output** - Export to CSV, Excel, Parquet, JSON, JSONL, or SQLite
-- **Response Caching** - SQLite-based caching for faster development and debugging
-- **Production Ready** - robots.txt compliance, graceful shutdown, checkpoints, proxy support
+- **Programmatic API** — `Crawler`, `crawl()`, and `stream()` let you embed scraping in any Python application
+- **Hook System** — Intercept requests and responses with the `CrawlHook` protocol
+- **HTTP/2 & Async** — Fast concurrent connections with per-domain rate limiting and retry logic
+- **Fast Parsing** — Selectolax HTML parsing (16x faster than BeautifulSoup)
+- **Built-in Presets** — Pre-configured schemas for popular sites (no coding required)
+- **Custom Schemas** — Define Pydantic models with CSS selectors and type coercion
+- **Multi-Format Output** — Export to CSV, Excel, Parquet, JSON, JSONL, or SQLite
+- **Response Caching** — SQLite-based caching for faster development and debugging
+- **Production Ready** — robots.txt compliance, graceful shutdown, checkpoints, proxy support
 
 ## Installation
 
@@ -26,28 +28,194 @@ pip install ergane
 
 ## Quick Start
 
-### Using Presets (Easiest)
+### CLI — run from your terminal
 
 ```bash
-# Use a preset - no schema needed!
+# Use a built-in preset (no code needed)
 ergane --preset quotes -o quotes.csv
 
-# Export to Excel
-ergane --preset hacker-news -o stories.xlsx
+# Crawl a custom URL
+ergane -u https://example.com -n 100 -o data.parquet
 
 # List available presets
 ergane --list-presets
 ```
 
-### Manual Crawling
+### Python — embed in your application
 
-```bash
-# Crawl a single site
-ergane -u https://example.com -n 100
+```python
+import asyncio
+from ergane import Crawler
 
-# Custom output and settings
-ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
+async def main():
+    async with Crawler(
+        urls=["https://quotes.toscrape.com"],
+        max_pages=20,
+    ) as crawler:
+        async for item in crawler.stream():
+            print(item.url, item.title)
+
+asyncio.run(main())
 ```
+
+## Python Library
+
+Ergane's engine is a pure async library. The CLI is a thin wrapper around it — everything the CLI can do, your code can do too.
+
+### Crawler
+
+The main entry point. Use it as an async context manager:
+
+```python
+from ergane import Crawler
+
+async with Crawler(
+    urls=["https://example.com"],
+    max_pages=50,
+    concurrency=10,
+    rate_limit=5.0,
+) as crawler:
+    results = await crawler.run()      # collect all items
+```
+
+Key parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `urls` | *(required)* | Seed URL(s) to start crawling |
+| `schema` | `None` | Pydantic model for typed extraction |
+| `concurrency` | `10` | Number of concurrent workers |
+| `max_pages` | `100` | Maximum pages to crawl |
+| `max_depth` | `3` | Maximum link-follow depth |
+| `rate_limit` | `10.0` | Requests per second per domain |
+| `timeout` | `30.0` | HTTP request timeout (seconds) |
+| `same_domain` | `True` | Only follow links on the seed domain |
+| `hooks` | `None` | List of `CrawlHook` instances |
+| `output` | `None` | File path to write results |
+| `output_format` | `"auto"` | `csv`, `excel`, `parquet`, `json`, `jsonl`, `sqlite` |
+| `cache` | `False` | Enable SQLite response caching |
+
+### run()
+
+Executes the crawl and returns all extracted items as a list:
+
+```python
+async with Crawler(urls=["https://example.com"], max_pages=10) as c:
+    results = await c.run()
+    print(f"Got {len(results)} items")
+```
+
+### stream()
+
+Yields items as they arrive — memory-efficient for large crawls:
+
+```python
+async with Crawler(urls=["https://example.com"], max_pages=500) as c:
+    async for item in c.stream():
+        process(item)  # handle each item immediately
+```
+
+### crawl()
+
+One-shot convenience function — creates a `Crawler`, runs it, returns results:
+
+```python
+from ergane import crawl
+
+results = await crawl(
+    urls=["https://example.com"],
+    max_pages=10,
+    concurrency=5,
+)
+```
+
+### Typed Extraction with Schemas
+
+Pass a Pydantic model with CSS selectors to extract structured data:
+
+```python
+from datetime import datetime
+from pydantic import BaseModel
+from ergane import Crawler, selector
+
+class Quote(BaseModel):
+    url: str
+    crawled_at: datetime
+    text: str = selector("span.text")
+    author: str = selector("small.author")
+    tags: list[str] = selector("div.tags a.tag")
+
+async with Crawler(
+    urls=["https://quotes.toscrape.com"],
+    schema=Quote,
+    max_pages=50,
+) as crawler:
+    for quote in await crawler.run():
+        print(f"{quote.author}: {quote.text}")
+```
+
+The `selector()` helper supports:
+
+| Argument | Description |
+|----------|-------------|
+| `css` | CSS selector string |
+| `attr` | Extract an attribute instead of text (e.g. `"href"`, `"src"`) |
+| `coerce` | Aggressive type coercion (`"$19.99"` → `19.99`) |
+| `default` | Default value if selector matches nothing |
+
+## Hooks
+
+Hooks let you intercept and modify requests before they're sent, and responses after they're received. They follow the `CrawlHook` protocol:
+
+```python
+from ergane import CrawlHook, CrawlRequest, CrawlResponse
+
+class CrawlHook(Protocol):
+    async def on_request(self, request: CrawlRequest) -> CrawlRequest | None: ...
+    async def on_response(self, response: CrawlResponse) -> CrawlResponse | None: ...
+```
+
+Return the (possibly modified) object to continue, or `None` to skip/discard.
+
+### BaseHook
+
+Subclass `BaseHook` and override only the methods you need:
+
+```python
+from ergane import BaseHook, CrawlRequest
+
+class SkipAdminPages(BaseHook):
+    async def on_request(self, request: CrawlRequest) -> CrawlRequest | None:
+        if "/admin" in request.url:
+            return None  # skip this URL
+        return request
+```
+
+### Built-in Hooks
+
+| Hook | Purpose |
+|------|---------|
+| `LoggingHook()` | Logs requests and responses at DEBUG level |
+| `AuthHeaderHook(headers)` | Injects custom headers (e.g. `{"Authorization": "Bearer ..."}`) |
+| `StatusFilterHook(allowed)` | Discards responses outside allowed status codes (default: `{200}`) |
+
+### Using Hooks
+
+```python
+from ergane import Crawler
+from ergane.crawler.hooks import LoggingHook, AuthHeaderHook
+
+async with Crawler(
+    urls=["https://api.example.com"],
+    hooks=[
+        AuthHeaderHook({"Authorization": "Bearer token123"}),
+        LoggingHook(),
+    ],
+) as crawler:
+    results = await crawler.run()
+```
+
+Hooks run in order: for requests, each hook receives the output of the previous one. The same applies for responses.
 
 ## Built-in Presets
 
@@ -61,117 +229,6 @@ ergane -u https://docs.python.org -n 50 -c 20 -r 5 -o python_docs.parquet
 | `ebay-listings` | ebay.com | title, price, condition, shipping, link |
 | `wikipedia-articles` | en.wikipedia.org | title, link |
 | `bbc-news` | bbc.com/news | title, summary, link |
-
-## Architecture
-
-Ergane uses an async pipeline architecture orchestrated by a central **Crawler** engine. N worker coroutines run concurrently, each pulling URLs from the scheduler, fetching, parsing, and feeding results to the output pipeline.
-
-```
-  CLI args ──→ Config ←── YAML file          Presets / Custom Schema
-               merge       (~/.ergane.yaml)       │
-                 │                                 │
-                 ▼                                 ▼
-          ┌─────────────────────────────────────────────────────────────┐
-          │                     Crawler  (engine)                       │
-          │  Spawns N async workers · signal handling · progress bar    │
-          │                                                             │
-          │  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ Worker loop (× N) ─ ─ ─ ─ ─ ─ ─ ┐  │
-          │                                                             │
-          │  │   ┌───────────────────────────────────────────────┐  │  │
-          │      │              Scheduler                        │     │
-          │  │   │  Min-heap priority queue · URL dedup (set)   │  │  │
-          │      │  Depth limit · asyncio.Event signaling        │     │
-          │  │   └──────────────┬────────────────────────────────┘  │  │
-          │                     │ get_nowait() → CrawlRequest            │
-          │  │                  ▼                                   │  │
-          │      ┌──────────────────────────────────────────────┐     │
-          │  │   │              Fetcher                          │  │  │
-          │      │  httpx AsyncClient (HTTP/2) · proxy support  │     │
-          │  │   │  Per-domain token-bucket rate limiter         │  │  │
-          │      │  Exponential backoff retry · robots.txt      │     │
-          │  │   └──────┬───────────────────────────────────────┘  │  │
-          │             │ CrawlResponse                               │
-          │  │          ▼                                           │  │
-          │      ┌──────────────────────────────────────────────┐     │
-          │  │   │              Parser                           │  │  │
-          │      │  selectolax HTML parsing (16× BeautifulSoup) │     │
-          │  │   │  Schema mode → typed Pydantic model          │  │  │
-          │      │  Legacy mode → ParsedItem                    │     │
-          │  │   │  Link extraction ─────────────────────┐      │  │  │
-          │      └──────┬───────────────────────────────┐│──────┘     │
-          │  │          │ model instance                 ││ new URLs│  │
-          │             ▼                               │▼            │
-          │  │   ┌────────────────────┐        ┌────────────────┐  │  │
-          │      │     Pipeline       │        │   Scheduler    │     │
-          │  │   │  Buffer → batch    │        │   .add_many()  │  │  │
-          │      │  files (numbered)  │        └────────────────┘     │
-          │  │   └────────┬───────────┘                            │  │
-          │               │                                           │
-          │  └ ─ ─ ─ ─ ─ ┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  │
-          │               │                                            │
-          └───────────────┼────────────────────────────────────────────┘
-                          │ flush on batch_size
-                          ▼
-          ┌──────────────────────────────────────────────────────────┐
-          │                   Pipeline  (output)                     │
-          │  Incremental batch files → consolidate & dedup by URL   │
-          │  Parquet · CSV · Excel · JSON · JSONL · SQLite           │
-          └──────────────────────────────┬───────────────────────────┘
-                                         │
-                                         ▼
-                                   output.parquet
-
-  ┌──────────────────────────────────────────────────────────────────┐
-  │                      Cross-cutting concerns                      │
-  │                                                                  │
-  │  Checkpoint ─ periodic JSON snapshots of scheduler state &       │
-  │               page count; enables --resume after interruption    │
-  │                                                                  │
-  │  Cache ───── optional SQLite response cache with TTL             │
-  │               (SHA-256 URL keys · non-blocking async I/O)        │
-  │                                                                  │
-  │  Schema ──── YAML loader → dynamic Pydantic model creation       │
-  │               type coercion ($19.99→19.99) · Parquet type mapping │
-  └──────────────────────────────────────────────────────────────────┘
-```
-
-## CLI Options
-
-Common options:
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--url` | `-u` | none | Start URL(s), can specify multiple |
-| `--output` | `-o` | `output.parquet` | Output file path |
-| `--max-pages` | `-n` | `100` | Maximum pages to crawl |
-| `--max-depth` | `-d` | `3` | Maximum crawl depth |
-| `--concurrency` | `-c` | `10` | Concurrent requests |
-| `--rate-limit` | `-r` | `10.0` | Requests per second per domain |
-| `--schema` | `-s` | none | YAML schema file for custom extraction |
-| `--preset` | `-p` | none | Use a built-in preset |
-| `--format` | `-f` | `auto` | Output format: `csv`, `excel`, `parquet`, `json`, `jsonl`, `sqlite` |
-| `--cache` | | `false` | Enable response caching |
-| `--cache-dir` | | `.ergane_cache` | Cache directory |
-| `--cache-ttl` | | `3600` | Cache TTL in seconds |
-
-Run `ergane --help` for all options including proxy, resume, logging, and config settings.
-
-## Response Caching
-
-Enable caching to speed up development and debugging workflows:
-
-```bash
-# First run - fetches from web, caches responses
-ergane --preset quotes --cache -n 10 -o quotes.csv
-
-# Second run - instant (served from cache)
-ergane --preset quotes --cache -n 10 -o quotes.csv
-
-# Custom cache settings
-ergane --preset bbc-news --cache --cache-dir ./my_cache --cache-ttl 60 -o news.csv
-```
-
-Cache is stored in SQLite at `.ergane_cache/response_cache.db` by default.
 
 ## Custom Schemas
 
@@ -205,6 +262,20 @@ Type coercion (`coerce: true`) handles common patterns: `"$19.99"` → `19.99`, 
 
 Supported types: `str`, `int`, `float`, `bool`, `datetime`, `list[T]`.
 
+You can also load YAML schemas programmatically:
+
+```python
+from ergane import Crawler, load_schema_from_yaml
+
+ProductItem = load_schema_from_yaml("schema.yaml")
+
+async with Crawler(
+    urls=["https://example.com"],
+    schema=ProductItem,
+) as crawler:
+    results = await crawler.run()
+```
+
 ## Output Formats
 
 Output format is auto-detected from file extension:
@@ -229,7 +300,91 @@ import polars as pl
 df = pl.read_parquet("output.parquet")
 ```
 
-## Advanced CLI Examples
+## Architecture
+
+Ergane separates the **engine** (pure async library) from the **CLI** (Rich progress bars, signal handling). Hooks plug into the pipeline at two points: after scheduling and after fetching.
+
+```
+         CLI (main.py)                          Python Library
+    ┌──────────────────────┐             ┌──────────────────────────┐
+    │  Click options        │             │  from ergane import ...   │
+    │  Rich progress bar    │             │  Crawler / crawl()       │
+    │  Signal handling      │             │  stream()                │
+    │  Config file merge    │             │                          │
+    └──────────┬───────────┘             └────────────┬─────────────┘
+               │                                      │
+               └──────────────┬───────────────────────┘
+                              │
+                              ▼
+               ┌──────────────────────────────────┐
+               │         Crawler  (engine)         │
+               │    Pure async · no I/O concerns   │
+               │    Spawns N worker coroutines     │
+               └──────────────┬───────────────────┘
+                              │
+              ┌───────────────┼───────────────────┐
+              │               │                   │
+              ▼               ▼                   ▼
+      ┌──────────────┐ ┌───────────┐   ┌──────────────┐
+      │  Scheduler   │ │  Fetcher  │   │   Pipeline   │
+      │  URL frontier│ │  HTTP/2   │   │  Batch write │
+      │  dedup queue │ │  retries  │   │  multi-format│
+      └──────┬───────┘ └─────┬─────┘   └──────────────┘
+             │               │
+             ▼               ▼
+  ┌──────────────────────────────────────────────────┐
+  │                Worker loop (× N)                  │
+  │                                                   │
+  │  1. Scheduler.get()   → CrawlRequest              │
+  │  2. hooks.on_request  → modify / skip             │
+  │  3. Fetcher.fetch()   → CrawlResponse             │
+  │  4. hooks.on_response → modify / discard          │
+  │  5. Parser.extract()  → Pydantic model            │
+  │  6. Pipeline.add()    → buffered output           │
+  │  7. extract_links()   → new URLs → Scheduler      │
+  └──────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────┐
+  │               Cross-cutting concerns              │
+  │                                                   │
+  │  Cache ─── SQLite response cache with TTL         │
+  │  Checkpoint ─ periodic JSON snapshots for resume  │
+  │  Schema ── YAML → dynamic Pydantic model + coerce │
+  └──────────────────────────────────────────────────┘
+```
+
+## CLI Reference
+
+### Common Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--url` | `-u` | none | Start URL(s), can specify multiple |
+| `--output` | `-o` | `output.parquet` | Output file path |
+| `--max-pages` | `-n` | `100` | Maximum pages to crawl |
+| `--max-depth` | `-d` | `3` | Maximum crawl depth |
+| `--concurrency` | `-c` | `10` | Concurrent requests |
+| `--rate-limit` | `-r` | `10.0` | Requests per second per domain |
+| `--schema` | `-s` | none | YAML schema file for custom extraction |
+| `--preset` | `-p` | none | Use a built-in preset |
+| `--format` | `-f` | `auto` | Output format: `csv`, `excel`, `parquet`, `json`, `jsonl`, `sqlite` |
+| `--timeout` | `-t` | `30` | Request timeout in seconds |
+| `--proxy` | `-x` | none | HTTP/HTTPS proxy URL |
+| `--same-domain/--any-domain` | | `--same-domain` | Restrict crawling to seed domain |
+| `--ignore-robots` | | `false` | Ignore robots.txt |
+| `--cache` | | `false` | Enable response caching |
+| `--cache-dir` | | `.ergane_cache` | Cache directory |
+| `--cache-ttl` | | `3600` | Cache TTL in seconds |
+| `--resume` | | | Resume from checkpoint |
+| `--checkpoint-interval` | | `100` | Save checkpoint every N pages |
+| `--log-level` | | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `--log-file` | | none | Write logs to file |
+| `--no-progress` | | | Disable progress bar |
+| `--config` | `-C` | none | Config file path |
+
+Run `ergane --help` for the full list.
+
+### Advanced CLI Examples
 
 ```bash
 # Crawl with a proxy
@@ -249,6 +404,33 @@ ergane -u https://example.com -C config.yaml -c 20
 ergane --preset hacker-news -u https://news.ycombinator.com/newest \
     -f csv -o newest.csv -n 200
 ```
+
+## Configuration
+
+Ergane looks for a config file in these locations (first match wins):
+
+1. Explicit path via `--config`/`-C`
+2. `~/.ergane.yaml`
+3. `./.ergane.yaml`
+4. `./ergane.yaml`
+
+```yaml
+crawler:
+  max_pages: 100
+  max_depth: 3
+  concurrency: 10
+  rate_limit: 10.0
+
+defaults:
+  output_format: "csv"
+  checkpoint_interval: 100
+
+logging:
+  level: "INFO"
+  file: null
+```
+
+CLI flags override config file values.
 
 ## Troubleshooting
 
