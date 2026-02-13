@@ -2,7 +2,10 @@ import asyncio
 import heapq
 from urllib.parse import parse_qsl, urlencode, urlparse
 
-from src.models import CrawlConfig, CrawlRequest
+from ergane.logging import get_logger
+from ergane.models import CrawlConfig, CrawlRequest
+
+_logger = get_logger()
 
 
 def _request_to_dict(request: CrawlRequest) -> dict:
@@ -47,6 +50,11 @@ class Scheduler:
                 return False
 
             if len(self._queue) >= self.config.max_queue_size:
+                _logger.warning(
+                    "Queue full (%d), dropping URL: %s",
+                    self.config.max_queue_size,
+                    request.url,
+                )
                 return False
 
             self._seen.add(normalized)

@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from src.schema.coercion import CoercionError, TypeCoercer
+from ergane.schema.coercion import CoercionError, TypeCoercer
 
 
 class TestStringCoercion:

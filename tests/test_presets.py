@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.presets import (
+from ergane.presets import (
     PRESETS,
     PresetConfig,
     get_preset,
@@ -12,7 +12,7 @@ from src.presets import (
     get_schemas_dir,
     list_presets,
 )
-from src.schema import load_schema_from_yaml
+from ergane.schema import load_schema_from_yaml
 
 
 class TestPresetRegistry:

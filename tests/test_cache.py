@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.crawler.cache import ResponseCache
+from ergane.crawler.cache import ResponseCache
 
 
 @pytest.fixture

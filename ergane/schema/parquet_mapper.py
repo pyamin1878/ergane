@@ -6,7 +6,7 @@ from typing import Any, Type, get_args, get_origin
 import polars as pl
 from pydantic import BaseModel
 
-from src.schema.base import SchemaConfig
+from ergane.schema.base import SchemaConfig
 
 
 class ParquetSchemaMapper:

@@ -1,19 +1,26 @@
-__version__ = "0.5.0"
-
-from src.crawler import (
+from ergane._version import __version__
+from ergane.crawler import (
+    BaseHook,
+    Crawler,
+    CrawlHook,
     Fetcher,
     Pipeline,
     Scheduler,
+    crawl,
     extract_data,
     extract_links,
     extract_typed_data,
 )
-from src.models import CrawlConfig, CrawlRequest, CrawlResponse, ParsedItem
-from src.schema import SchemaExtractor, load_schema_from_yaml, selector
+from ergane.models import CrawlConfig, CrawlRequest, CrawlResponse, ParsedItem
+from ergane.schema import SchemaExtractor, load_schema_from_yaml, selector
 
 __all__ = [
     "__version__",
+    "BaseHook",
+    "crawl",
     "CrawlConfig",
+    "CrawlHook",
+    "Crawler",
     "CrawlRequest",
     "CrawlResponse",
     "extract_data",

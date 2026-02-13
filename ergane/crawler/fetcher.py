@@ -5,8 +5,11 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
-from src.crawler.cache import ResponseCache
-from src.models import CrawlConfig, CrawlRequest, CrawlResponse
+from ergane.crawler.cache import ResponseCache
+from ergane.logging import get_logger
+from ergane.models import CrawlConfig, CrawlRequest, CrawlResponse
+
+_logger = get_logger()
 
 
 class TokenBucket:
@@ -97,8 +100,8 @@ class Fetcher:
                 async with self._robots_lock:
                     self._robots_cache[robots_url] = rp
                 return rp
-        except (httpx.HTTPError, httpx.TimeoutException):
-            pass  # robots.txt fetch failed, allow crawl
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            _logger.debug("robots.txt fetch failed for %s: %s", robots_url, exc)
 
         async with self._robots_lock:
             self._robots_cache[robots_url] = None
@@ -147,7 +150,8 @@ class Fetcher:
             await bucket.acquire()
 
             try:
-                resp = await self._client.get(request.url)
+                extra_headers = request.metadata.get("headers", {})
+                resp = await self._client.get(request.url, headers=extra_headers)
                 response = CrawlResponse(
                     url=str(resp.url),
                     status_code=resp.status_code,

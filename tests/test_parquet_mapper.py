@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from pydantic import BaseModel
 
-from src.schema import ParquetSchemaMapper, selector
+from ergane.schema import ParquetSchemaMapper, selector
 
 
 class TestTypeMapping:

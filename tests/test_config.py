@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.config import load_config, merge_config
+from ergane.config import load_config, merge_config
 
 
 @pytest.fixture

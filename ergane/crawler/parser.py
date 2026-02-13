@@ -4,8 +4,11 @@ from urllib.parse import urljoin, urlparse
 from pydantic import BaseModel
 from selectolax.parser import HTMLParser
 
-from src.models import CrawlResponse, ParsedItem
-from src.schema import SchemaConfig, SchemaExtractor
+from ergane.logging import get_logger
+from ergane.models import CrawlResponse, ParsedItem
+from ergane.schema import SchemaConfig, SchemaExtractor
+
+_logger = get_logger()
 
 
 def _extract_text_from_tree(tree: HTMLParser) -> str:
@@ -122,6 +125,7 @@ def extract_data(
         Parsed item with extracted data
     """
     if not response.content:
+        _logger.warning("Empty content received for %s", response.url)
         return ParsedItem(
             url=response.url,
             extracted_data={"error": response.error or "No content"},

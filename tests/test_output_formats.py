@@ -8,8 +8,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from src.crawler import Pipeline
-from src.models import CrawlConfig, ParsedItem
+from ergane.crawler import Pipeline
+from ergane.models import CrawlConfig, ParsedItem
 
 
 @pytest.fixture

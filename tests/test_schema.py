@@ -6,7 +6,7 @@ from typing import Optional
 import pytest
 from pydantic import BaseModel
 
-from src.schema import FieldConfig, SchemaConfig, selector
+from ergane.schema import FieldConfig, SchemaConfig, selector
 
 
 class TestSelectorHelper:

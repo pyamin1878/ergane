@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import BaseModel
 
-from src.schema import ExtractionError, SchemaExtractor, selector
+from ergane.schema import ExtractionError, SchemaExtractor, selector
 
 
 class TestBasicExtraction:

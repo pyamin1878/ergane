@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.crawler.checkpoint import (
+from ergane.crawler.checkpoint import (
     CrawlerCheckpoint,
     create_checkpoint,
     delete_checkpoint,
@@ -123,7 +123,7 @@ def test_failed_save_preserves_original(
     original_data = checkpoint_path.read_text()
 
     # Simulate a crash during json.dump by making it raise
-    with patch("src.crawler.checkpoint.json.dump", side_effect=OSError("disk full")):
+    with patch("ergane.crawler.checkpoint.json.dump", side_effect=OSError("disk full")):
         with pytest.raises(OSError, match="disk full"):
             modified = CrawlerCheckpoint(
                 pages_crawled=999,

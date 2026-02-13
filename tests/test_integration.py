@@ -8,8 +8,7 @@ from threading import Thread
 import polars as pl
 import pytest
 
-from src.main import Crawler
-from src.models import CrawlConfig
+from ergane.crawler.engine import Crawler
 
 # ---------------------------------------------------------------------------
 # Lightweight mock HTTP server
@@ -90,24 +89,18 @@ class TestCrawlerIntegration:
     ):
         """Crawler fetches pages and writes output."""
         output = tmp_path / "out.parquet"
-        config = CrawlConfig(
-            max_requests_per_second=100.0,
-            max_concurrent_requests=4,
-            request_timeout=5.0,
-            max_retries=0,
-            batch_size=10,
-            respect_robots_txt=False,
-        )
-        crawler = Crawler(
-            config=config,
-            start_urls=[f"{mock_server}/"],
-            output_path=str(output),
+        async with Crawler(
+            urls=[f"{mock_server}/"],
+            concurrency=4,
             max_pages=10,
             max_depth=2,
             same_domain=True,
-            show_progress=False,
-        )
-        await crawler.run()
+            rate_limit=100.0,
+            timeout=5.0,
+            respect_robots_txt=False,
+            output=str(output),
+        ) as crawler:
+            await crawler.run()
 
         assert output.exists()
         df = pl.read_parquet(output)
@@ -125,24 +118,18 @@ class TestCrawlerIntegration:
     ):
         """Crawler stops after max_pages is reached."""
         output = tmp_path / "out.parquet"
-        config = CrawlConfig(
-            max_requests_per_second=100.0,
-            max_concurrent_requests=1,
-            request_timeout=5.0,
-            max_retries=0,
-            batch_size=10,
-            respect_robots_txt=False,
-        )
-        crawler = Crawler(
-            config=config,
-            start_urls=[f"{mock_server}/"],
-            output_path=str(output),
+        async with Crawler(
+            urls=[f"{mock_server}/"],
+            concurrency=1,
             max_pages=2,
             max_depth=3,
             same_domain=True,
-            show_progress=False,
-        )
-        await crawler.run()
+            rate_limit=100.0,
+            timeout=5.0,
+            respect_robots_txt=False,
+            output=str(output),
+        ) as crawler:
+            await crawler.run()
 
         assert output.exists()
         df = pl.read_parquet(output)
@@ -154,24 +141,18 @@ class TestCrawlerIntegration:
     ):
         """Crawler does not follow links beyond max_depth."""
         output = tmp_path / "out.parquet"
-        config = CrawlConfig(
-            max_requests_per_second=100.0,
-            max_concurrent_requests=1,
-            request_timeout=5.0,
-            max_retries=0,
-            batch_size=10,
-            respect_robots_txt=False,
-        )
-        crawler = Crawler(
-            config=config,
-            start_urls=[f"{mock_server}/"],
-            output_path=str(output),
+        async with Crawler(
+            urls=[f"{mock_server}/"],
+            concurrency=1,
             max_pages=10,
             max_depth=0,
             same_domain=True,
-            show_progress=False,
-        )
-        await crawler.run()
+            rate_limit=100.0,
+            timeout=5.0,
+            respect_robots_txt=False,
+            output=str(output),
+        ) as crawler:
+            await crawler.run()
 
         assert output.exists()
         df = pl.read_parquet(output)
@@ -180,43 +161,38 @@ class TestCrawlerIntegration:
 
 
 class TestGracefulShutdown:
-    """Tests for graceful shutdown via the _shutdown event."""
+    """Tests for graceful shutdown via the shutdown() method."""
 
     @pytest.mark.asyncio
-    async def test_shutdown_event_stops_crawler(
+    async def test_shutdown_stops_crawler(
         self, mock_server: str, tmp_path: Path
     ):
-        """Setting _shutdown event causes crawler to stop early."""
+        """Calling shutdown() causes crawler to stop early."""
         output = tmp_path / "out.parquet"
-        config = CrawlConfig(
-            max_requests_per_second=100.0,
-            max_concurrent_requests=1,
-            request_timeout=5.0,
-            max_retries=0,
-            batch_size=10,
-            respect_robots_txt=False,
-        )
         crawler = Crawler(
-            config=config,
-            start_urls=[f"{mock_server}/"],
-            output_path=str(output),
+            urls=[f"{mock_server}/"],
+            concurrency=1,
             max_pages=1000,
             max_depth=10,
             same_domain=True,
-            show_progress=False,
+            rate_limit=100.0,
+            timeout=5.0,
+            respect_robots_txt=False,
+            output=str(output),
         )
 
-        # Schedule shutdown after a short delay
-        async def trigger_shutdown():
-            await asyncio.sleep(0.3)
-            crawler._shutdown.set()
+        async with crawler:
+            # Schedule shutdown after a short delay
+            async def trigger_shutdown():
+                await asyncio.sleep(0.3)
+                crawler.shutdown()
 
-        shutdown_task = asyncio.create_task(trigger_shutdown())
-        await crawler.run()
-        await shutdown_task
+            shutdown_task = asyncio.create_task(trigger_shutdown())
+            await crawler.run()
+            await shutdown_task
 
         # Crawler should have stopped well before 1000 pages
-        assert crawler._pages_crawled < 1000
+        assert crawler.pages_crawled < 1000
 
     @pytest.mark.asyncio
     async def test_shutdown_flushes_data(
@@ -224,31 +200,26 @@ class TestGracefulShutdown:
     ):
         """Data collected before shutdown is still written to disk."""
         output = tmp_path / "out.parquet"
-        config = CrawlConfig(
-            max_requests_per_second=100.0,
-            max_concurrent_requests=1,
-            request_timeout=5.0,
-            max_retries=0,
-            batch_size=10,
-            respect_robots_txt=False,
-        )
         crawler = Crawler(
-            config=config,
-            start_urls=[f"{mock_server}/"],
-            output_path=str(output),
+            urls=[f"{mock_server}/"],
+            concurrency=1,
             max_pages=1000,
             max_depth=10,
             same_domain=True,
-            show_progress=False,
+            rate_limit=100.0,
+            timeout=5.0,
+            respect_robots_txt=False,
+            output=str(output),
         )
 
-        async def trigger_shutdown():
-            await asyncio.sleep(0.5)
-            crawler._shutdown.set()
+        async with crawler:
+            async def trigger_shutdown():
+                await asyncio.sleep(0.5)
+                crawler.shutdown()
 
-        shutdown_task = asyncio.create_task(trigger_shutdown())
-        await crawler.run()
-        await shutdown_task
+            shutdown_task = asyncio.create_task(trigger_shutdown())
+            await crawler.run()
+            await shutdown_task
 
         # Output should exist with whatever was collected
         assert output.exists()
@@ -264,7 +235,8 @@ class TestDeduplicationOnConsolidate:
         self, tmp_path: Path
     ):
         """Duplicate URLs across batches are removed during consolidation."""
-        from src.crawler import Pipeline
+        from ergane.crawler import Pipeline
+        from ergane.models import CrawlConfig
 
         output = tmp_path / "dedup.parquet"
         config = CrawlConfig(batch_size=2)

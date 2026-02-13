@@ -1,13 +1,13 @@
 """Tests for HTML parsing functionality."""
 
-from src.crawler.parser import (
+from ergane.crawler.parser import (
     extract_by_selector,
     extract_data,
     extract_links,
     extract_text,
     extract_title,
 )
-from src.models import CrawlRequest, CrawlResponse
+from ergane.models import CrawlRequest, CrawlResponse
 
 
 class TestExtractTitle:

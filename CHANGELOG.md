@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-13
+
+### Added
+
+- **Programmatic API**: Ergane is now usable as a Python library, not just a CLI tool
+  - `Crawler` class with async context manager support
+  - `run()` returns results as a list; `stream()` yields items incrementally
+  - `crawl()` one-shot convenience function
+  - Works without output path for pure in-memory usage
+  ```python
+  from ergane import Crawler, crawl
+
+  # Context manager
+  async with Crawler(urls=["https://example.com"], max_pages=10) as c:
+      results = await c.run()
+
+  # One-shot
+  results = await crawl(urls=["https://example.com"], max_pages=10)
+  ```
+
+- **Hook System**: Intercept and modify requests/responses during crawling
+  - `CrawlHook` protocol (structural subtyping — no inheritance required)
+  - `BaseHook` convenience class (override only what you need)
+  - Built-in hooks: `LoggingHook`, `AuthHeaderHook`, `StatusFilterHook`
+  - Return `None` from a hook to skip a request or discard a response
+  ```python
+  from ergane import Crawler, BaseHook
+
+  class MyHook(BaseHook):
+      async def on_request(self, req):
+          print(f"Fetching: {req.url}")
+          return req
+
+  async with Crawler(urls=[...], hooks=[MyHook()]) as c:
+      await c.run()
+  ```
+
+- **New exports**: `Crawler`, `crawl`, `BaseHook`, `CrawlHook` added to `ergane.__init__`
+
+### Fixed
+
+- **User-agent string**: Changed from `Arachne/0.1` (wrong project) to `Ergane/0.6.0 (+https://github.com/pyamin1878/ergane)`
+- **Default concurrency mismatch**: `CrawlConfig.max_concurrent_requests` default changed from `50` to `10` to match CLI behavior
+- **Silent failures**: Added logging for robots.txt fetch failures (DEBUG), queue-full URL drops (WARNING), and empty content responses (WARNING)
+- **Fragile tests**: Replaced `httpbin.org` calls in `test_fetcher.py` with local mock server
+
+### Changed
+
+- **BREAKING**: `Crawler` constructor now uses flat keyword args instead of `CrawlConfig` + scattered params
+  - Old: `Crawler(config=config, start_urls=[...], output_path="out.parquet", max_pages=100, ...)`
+  - New: `Crawler(urls=[...], output="out.parquet", max_pages=100, ...)`
+- `ergane/main.py` reduced from 602 to ~250 lines (thin CLI wrapper over `engine.Crawler`)
+- Fetcher now supports `request.metadata["headers"]` for injecting custom headers per-request
+- Version is now defined in `ergane/_version.py` (single source of truth)
+
+### Architecture
+
+- New `ergane/crawler/engine.py`: Pure async crawl orchestration (no Click, Rich, or signal handling)
+- New `ergane/crawler/hooks.py`: Hook protocol and built-in implementations
+- Shared `MockHandler` in `tests/conftest.py` with `/get`, `/delay/{n}`, `/status/{code}` endpoints
+
 ## [0.3.1] - 2026-01-26
 
 ### Added
@@ -122,7 +183,7 @@ ergane --preset hacker-news -n 100 -o hn_stories.csv
 
 ### New Modules
 
-- `src/schema/` - Schema infrastructure for custom output types
+- `ergane/schema/` - Schema infrastructure for custom output types
   - `selector()` helper function for defining CSS selectors on Pydantic fields
   - `SchemaExtractor` for HTML to typed model extraction
   - `TypeCoercer` for string to typed value conversion

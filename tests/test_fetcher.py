@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 
-from src.crawler import Fetcher
-from src.crawler.fetcher import TokenBucket
-from src.models import CrawlConfig, CrawlRequest
+from ergane.crawler import Fetcher
+from ergane.crawler.fetcher import TokenBucket
+from ergane.models import CrawlConfig, CrawlRequest
 
 
 class TestTokenBucket:
@@ -134,31 +134,32 @@ class TestRobotsHandling:
 
 
 class TestFetchResponses:
-    """Fetch response handling tests."""
+    """Fetch response handling tests using a local mock server."""
 
     @pytest.mark.asyncio
-    async def test_successful_fetch_structure(self, config: CrawlConfig):
+    async def test_successful_fetch_structure(
+        self, config: CrawlConfig, mock_server: str,
+    ):
         """Test response structure from successful fetch."""
-        # This will fail but tests error handling path
         config.max_retries = 0
-        config.request_timeout = 1.0
 
         async with Fetcher(config) as fetcher:
-            request = CrawlRequest(url="https://httpbin.org/get")
+            request = CrawlRequest(url=f"{mock_server}/get")
             response = await fetcher.fetch(request)
 
             assert response.url is not None
             assert response.request == request
             assert response.fetched_at is not None
+            assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_timeout_handling(self, config: CrawlConfig):
+    async def test_timeout_handling(self, config: CrawlConfig, mock_server: str):
         """Test timeout produces proper error response."""
         config.max_retries = 0
         config.request_timeout = 0.001  # Very short timeout
 
         async with Fetcher(config) as fetcher:
-            request = CrawlRequest(url="https://httpbin.org/delay/10")
+            request = CrawlRequest(url=f"{mock_server}/delay/10")
             response = await fetcher.fetch(request)
 
             assert response.status_code == 0
@@ -178,30 +179,30 @@ class TestFetchResponses:
 
 
 class TestRetryLogic:
-    """Retry mechanism tests."""
+    """Retry mechanism tests using a local mock server."""
 
     @pytest.mark.asyncio
-    async def test_retry_count_respected(self, config: CrawlConfig):
+    async def test_retry_count_respected(self, config: CrawlConfig, mock_server: str):
         """Test that max retries is respected."""
         config.max_retries = 2
         config.retry_base_delay = 0.01
         config.request_timeout = 0.001
 
         async with Fetcher(config) as fetcher:
-            request = CrawlRequest(url="https://httpbin.org/delay/10")
+            request = CrawlRequest(url=f"{mock_server}/delay/10")
             # This should try 3 times (initial + 2 retries)
             await fetcher.fetch(request)
             # Test passes if it completes without hanging
 
     @pytest.mark.asyncio
-    async def test_exponential_backoff(self, config: CrawlConfig):
+    async def test_exponential_backoff(self, config: CrawlConfig, mock_server: str):
         """Test that retry delay increases exponentially."""
         config.max_retries = 2
         config.retry_base_delay = 0.1
         config.request_timeout = 0.001
 
         async with Fetcher(config) as fetcher:
-            request = CrawlRequest(url="https://httpbin.org/delay/10")
+            request = CrawlRequest(url=f"{mock_server}/delay/10")
 
             start = asyncio.get_event_loop().time()
             await fetcher.fetch(request)

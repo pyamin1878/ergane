@@ -7,8 +7,8 @@ from typing import Any, Literal, Type, TypeVar
 import polars as pl
 from pydantic import BaseModel
 
-from src.models import CrawlConfig, ParsedItem
-from src.schema import ParquetSchemaMapper
+from ergane.models import CrawlConfig, ParsedItem
+from ergane.schema import ParquetSchemaMapper
 
 T = TypeVar("T", bound=BaseModel)
 

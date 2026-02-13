@@ -6,8 +6,8 @@ from typing import Any, Type
 from pydantic import BaseModel
 from selectolax.parser import HTMLParser, Node
 
-from src.schema.base import FieldConfig, SchemaConfig
-from src.schema.coercion import CoercionError, TypeCoercer
+from ergane.schema.base import FieldConfig, SchemaConfig
+from ergane.schema.coercion import CoercionError, TypeCoercer
 
 
 class ExtractionError(Exception):

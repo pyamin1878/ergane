@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from src.crawler import Scheduler
-from src.models import CrawlConfig, CrawlRequest
+from ergane.crawler import Scheduler
+from ergane.models import CrawlConfig, CrawlRequest
 
 
 @pytest.fixture

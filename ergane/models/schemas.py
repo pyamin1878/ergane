@@ -5,17 +5,23 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
+from ergane._version import __version__
+
+
+def _default_user_agent() -> str:
+    return f"Ergane/{__version__} (+https://github.com/pyamin1878/ergane)"
+
 
 class CrawlConfig(BaseModel):
     """Configuration for the crawler."""
 
     max_requests_per_second: float = Field(default=10.0, gt=0)
-    max_concurrent_requests: int = Field(default=50, gt=0)
+    max_concurrent_requests: int = Field(default=10, gt=0)
     request_timeout: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     retry_base_delay: float = Field(default=1.0, gt=0)
     respect_robots_txt: bool = Field(default=True)
-    user_agent: str = Field(default="Arachne/0.1 (+https://github.com/arachne)")
+    user_agent: str = Field(default_factory=_default_user_agent)
     max_queue_size: int = Field(default=10000, gt=0)
     batch_size: int = Field(default=100, gt=0)
     output_schema: Type[BaseModel] | None = Field(default=None)

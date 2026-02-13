@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ergane"
-version = "0.5.0"
+version = "0.6.0"
 description = "High-performance async web scraper with selectolax parsing"
 authors = [{name = "pyamin1878"}]
 license = {text = "MIT"}
@@ -51,10 +51,10 @@ Repository = "https://github.com/pyamin1878/ergane"
 Issues = "https://github.com/pyamin1878/ergane/issues"
 
 [project.scripts]
-ergane = "src.main:main"
+ergane = "ergane.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["ergane"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

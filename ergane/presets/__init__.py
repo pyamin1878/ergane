@@ -1,6 +1,6 @@
 """Presets module for common website scraping configurations."""
 
-from src.presets.registry import (
+from ergane.presets.registry import (
     PRESETS,
     PresetConfig,
     get_preset,
