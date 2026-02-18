@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-02-18
+
+### Added
+
+- **MCP Server**: Expose Ergane's scraping capabilities to LLMs via the [Model Context Protocol](https://modelcontextprotocol.io/)
+  - Install with `pip install ergane[mcp]`
+  - Run with `ergane mcp` or `python -m ergane.mcp`
+  - stdio transport, compatible with Claude Code, Claude Desktop, and other MCP clients
+  - Four tools:
+    - `list_presets_tool` — discover available presets with fields and target URLs
+    - `extract_tool` — single-page extraction with CSS selectors or YAML schema
+    - `scrape_preset_tool` — zero-config scraping using built-in presets
+    - `crawl_tool` — multi-page crawling with JSON, CSV, or JSONL output
+  - Preset resources (`preset://{name}`) for browsing preset details
+  - Large result sets automatically truncated to 50 items with total count
+
+- **CLI subcommands**: The CLI now uses `ergane crawl` and `ergane mcp` subcommands
+  - `ergane crawl` — all existing crawl options (unchanged)
+  - `ergane mcp` — start the MCP server
+  - Backward compatible: `ergane --preset quotes -o quotes.csv` still works
+
+### Changed
+
+- CLI refactored from a single Click command to a Click group with subcommands
+- `pyproject.toml` entry point changed from `ergane.main:main` to `ergane.main:cli`
+
+### New Dependencies (optional)
+
+- `mcp[cli]>=1.0.0` — MCP SDK (only installed with `ergane[mcp]`)
+
 ## [0.6.0] - 2026-02-13
 
 ### Added
