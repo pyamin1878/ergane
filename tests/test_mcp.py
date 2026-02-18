@@ -1,12 +1,29 @@
 """Tests for the Ergane MCP server."""
 
 import json
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
 
 from ergane.mcp.resources import get_preset_resource
 from ergane.mcp.tools import crawl_tool, extract_tool, list_presets_tool, scrape_preset_tool
+
+
+class TestEntryPoints:
+    """Tests for MCP server entry points."""
+
+    def test_module_entry_point(self):
+        """Verify python -m ergane.mcp module can be loaded."""
+        result = subprocess.run(
+            [sys.executable, "-c", "from ergane.mcp import server; print(server.name)"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert "ergane" in result.stdout.strip()
 
 
 class TestListPresets:
