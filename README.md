@@ -18,12 +18,16 @@ High-performance async web scraper with HTTP/2 support, built with Python.
 - **Custom Schemas** — Define Pydantic models with CSS selectors and type coercion
 - **Multi-Format Output** — Export to CSV, Excel, Parquet, JSON, JSONL, or SQLite
 - **Response Caching** — SQLite-based caching for faster development and debugging
+- **MCP Server** — Expose scraping tools to LLMs via the Model Context Protocol
 - **Production Ready** — robots.txt compliance, graceful shutdown, checkpoints, proxy support
 
 ## Installation
 
 ```bash
 pip install ergane
+
+# With MCP server support (optional)
+pip install ergane[mcp]
 ```
 
 ## Quick Start
@@ -217,6 +221,101 @@ async with Crawler(
 
 Hooks run in order: for requests, each hook receives the output of the previous one. The same applies for responses.
 
+## MCP Server
+
+Ergane includes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that lets LLMs crawl websites and extract structured data. Install the optional dependency:
+
+```bash
+pip install ergane[mcp]
+```
+
+### Running the Server
+
+```bash
+# Via CLI subcommand
+ergane mcp
+
+# Via Python module
+python -m ergane.mcp
+```
+
+Both start a stdio-based MCP server compatible with Claude Code, Claude Desktop, and other MCP clients.
+
+### Configuration
+
+Add to your MCP client config (e.g. Claude Desktop `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "ergane": {
+      "command": "ergane",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or for Claude Code (`~/.claude/claude_code_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "ergane": {
+      "command": "ergane",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Available Tools
+
+The MCP server exposes four tools:
+
+#### `list_presets_tool`
+
+Discover all built-in scraping presets with their target URLs and available fields.
+
+#### `extract_tool`
+
+Extract structured data from a single web page using CSS selectors.
+
+```
+Arguments:
+  url          — URL to scrape (required)
+  selectors    — Map of field names to CSS selectors, e.g. {"title": "h1", "price": ".price"}
+  schema_yaml  — Full YAML schema (alternative to selectors)
+```
+
+#### `scrape_preset_tool`
+
+Scrape a website using a built-in preset — zero configuration needed.
+
+```
+Arguments:
+  preset     — Preset name, e.g. "hacker-news", "quotes" (required)
+  max_pages  — Maximum pages to scrape (default: 5)
+```
+
+#### `crawl_tool`
+
+Crawl one or more websites with full control over depth, concurrency, and output format.
+
+```
+Arguments:
+  urls           — Starting URLs (required)
+  schema_yaml    — YAML schema for CSS-based extraction
+  max_pages      — Maximum pages to crawl (default: 10)
+  max_depth      — Link-follow depth (default: 1, 0 = seed only)
+  concurrency    — Concurrent requests (default: 5)
+  output_format  — "json", "csv", or "jsonl" (default: "json")
+```
+
+### Resources
+
+Each built-in preset is also exposed as an MCP resource at `preset://{name}` (e.g. `preset://hacker-news`), allowing LLMs to browse preset details before scraping.
+
 ## Built-in Presets
 
 | Preset | Site | Fields Extracted |
@@ -302,18 +401,18 @@ df = pl.read_parquet("output.parquet")
 
 ## Architecture
 
-Ergane separates the **engine** (pure async library) from the **CLI** (Rich progress bars, signal handling). Hooks plug into the pipeline at two points: after scheduling and after fetching.
+Ergane separates the **engine** (pure async library) from its three interfaces: the **CLI** (Rich progress bars, signal handling), the **Python library** (direct import), and the **MCP server** (LLM integration). Hooks plug into the pipeline at two points: after scheduling and after fetching.
 
 ```
-         CLI (main.py)                          Python Library
-    ┌──────────────────────┐             ┌──────────────────────────┐
-    │  Click options        │             │  from ergane import ...   │
-    │  Rich progress bar    │             │  Crawler / crawl()       │
-    │  Signal handling      │             │  stream()                │
-    │  Config file merge    │             │                          │
-    └──────────┬───────────┘             └────────────┬─────────────┘
-               │                                      │
-               └──────────────┬───────────────────────┘
+         CLI (main.py)              Python Library             MCP Server
+    ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+    │  Click options        │  │  from ergane import   │  │  FastMCP (stdio)     │
+    │  Rich progress bar    │  │  Crawler / crawl()    │  │  4 tools + resources │
+    │  Signal handling      │  │  stream()             │  │  ergane mcp          │
+    │  Config file merge    │  │                       │  │                      │
+    └──────────┬───────────┘  └────────────┬──────────┘  └──────────┬───────────┘
+               │                           │                        │
+               └───────────────┬───────────┴────────────────────────┘
                               │
                               ▼
                ┌──────────────────────────────────┐
