@@ -55,7 +55,7 @@ Repository = "https://github.com/pyamin1878/ergane"
 Issues = "https://github.com/pyamin1878/ergane/issues"
 
 [project.scripts]
-ergane = "ergane.main:main"
+ergane = "ergane.main:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ergane"]
