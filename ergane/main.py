@@ -44,7 +44,26 @@ def print_presets_table() -> None:
     click.echo("Example: ergane --preset quotes -o quotes.csv\n")
 
 
-@click.command()
+class DefaultGroup(click.Group):
+    """A Click group that defaults to 'crawl' when no subcommand is given."""
+
+    def parse_args(self, ctx, args):
+        # If the first arg looks like an option (starts with -), insert 'crawl'
+        if args and args[0].startswith("-"):
+            args = ["crawl"] + args
+        # If no args at all, show help (already handled by invoke_without_command)
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=DefaultGroup, invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
+    """Ergane - High-performance async web scraper."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@cli.command()
 @click.option(
     "--url", "-u", multiple=True,
     help="Start URL(s) to crawl. Repeat for multiple.",
@@ -160,7 +179,7 @@ def print_presets_table() -> None:
     default=3600,
     help="Cache TTL in seconds",
 )
-def main(
+def crawl(
     url: tuple[str, ...],
     output: str,
     max_pages: int | None,
@@ -185,30 +204,30 @@ def main(
     cache_dir: Path,
     cache_ttl: int,
 ) -> None:
-    """Ergane - High-performance async web scraper.
+    """Crawl websites and extract data.
 
     \b
     Presets (no schema needed):
-      ergane --preset quotes -o quotes.csv
-      ergane --preset hacker-news -o stories.xlsx -n 200
-      ergane --list-presets            # show all presets
+      ergane crawl --preset quotes -o quotes.csv
+      ergane crawl --preset hacker-news -o stories.xlsx -n 200
+      ergane crawl --list-presets            # show all presets
 
     \b
     Custom URLs:
-      ergane -u https://example.com -o data.parquet
-      ergane -u https://a.com -u https://b.com -n 50
+      ergane crawl -u https://example.com -o data.parquet
+      ergane crawl -u https://a.com -u https://b.com -n 50
 
     \b
     Custom schema:
-      ergane -u https://shop.com -s schema.yaml -o items.csv
+      ergane crawl -u https://shop.com -s schema.yaml -o items.csv
 
     \b
     Caching (instant reruns during development):
-      ergane --preset quotes --cache -n 10 -o quotes.csv
+      ergane crawl --preset quotes --cache -n 10 -o quotes.csv
 
     \b
     Resume an interrupted crawl:
-      ergane -u https://example.com -n 1000 --resume
+      ergane crawl -u https://example.com -n 1000 --resume
     """
     # Handle --list-presets
     if list_presets:
@@ -373,5 +392,13 @@ def main(
     asyncio.run(_run_with_progress())
 
 
+@cli.command()
+def mcp():
+    """Start the Ergane MCP server (stdio transport)."""
+    from ergane.mcp import run
+
+    run()
+
+
 if __name__ == "__main__":
-    main()
+    cli()

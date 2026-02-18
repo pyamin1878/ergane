@@ -35,6 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = [
+    "mcp[cli]>=1.0.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -43,6 +46,7 @@ dev = [
     "lxml>=5.0.0",
     "mypy>=1.8.0",
     "ruff>=0.2.0",
+    "mcp[cli]>=1.0.0",
 ]
 
 [project.urls]
@@ -51,7 +55,7 @@ Repository = "https://github.com/pyamin1878/ergane"
 Issues = "https://github.com/pyamin1878/ergane/issues"
 
 [project.scripts]
-ergane = "ergane.main:main"
+ergane = "ergane.main:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ergane"]
