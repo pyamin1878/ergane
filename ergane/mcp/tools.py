@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 import yaml
 from pydantic import BaseModel, Field, create_model
 
+from ergane.crawler.engine import Crawler
 from ergane.crawler.fetcher import Fetcher
 from ergane.crawler.parser import extract_data, extract_typed_data
 from ergane.models import CrawlConfig, CrawlRequest
-from ergane.presets import PRESETS, get_preset_schema_path
-from ergane.schema.yaml_loader import load_schema_from_string
+from ergane.presets import PRESETS, get_preset, get_preset_schema_path
+from ergane.schema.yaml_loader import load_schema_from_string, load_schema_from_yaml
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -108,7 +109,56 @@ async def extract_tool(
         return json.dumps({"error": str(e)})
 
 
+async def scrape_preset_tool(
+    preset: str,
+    max_pages: int = 5,
+) -> str:
+    """Scrape a website using a built-in preset — zero configuration needed.
+
+    Available presets: hacker-news, github-repos, reddit, quotes,
+    amazon-products, ebay-listings, wikipedia-articles, bbc-news.
+
+    Use the list_presets tool to see details about each preset.
+
+    Args:
+        preset: Preset name (e.g., "hacker-news", "quotes")
+        max_pages: Maximum number of pages to scrape (default: 5)
+
+    Returns:
+        JSON array of extracted items, or error message.
+    """
+    try:
+        preset_config = get_preset(preset)
+        schema_path = get_preset_schema_path(preset)
+        schema = load_schema_from_yaml(schema_path)
+
+        async with Crawler(
+            urls=preset_config.start_urls,
+            schema=schema,
+            max_pages=max_pages,
+            max_depth=preset_config.defaults.get("max_depth", 1),
+            concurrency=5,
+            rate_limit=5.0,
+            timeout=60.0,
+        ) as crawler:
+            results = await crawler.run()
+
+        items = [r.model_dump(mode="json") for r in results]
+        MAX_ITEMS = 50
+        if len(items) > MAX_ITEMS:
+            return json.dumps({
+                "items": items[:MAX_ITEMS],
+                "total": len(items),
+                "truncated": True,
+            }, indent=2, default=str)
+        return json.dumps(items, indent=2, default=str)
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Register all Ergane tools with the MCP server."""
     mcp.tool()(list_presets_tool)
     mcp.tool()(extract_tool)
+    mcp.tool()(scrape_preset_tool)

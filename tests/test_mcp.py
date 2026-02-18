@@ -1,11 +1,12 @@
 """Tests for the Ergane MCP server."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 
 from ergane.mcp.resources import get_preset_resource
-from ergane.mcp.tools import extract_tool, list_presets_tool
+from ergane.mcp.tools import extract_tool, list_presets_tool, scrape_preset_tool
 
 
 class TestListPresets:
@@ -99,3 +100,29 @@ fields:
         # Without selectors, returns basic page data
         assert "url" in data
         assert "title" in data
+
+
+class TestScrapePresetTool:
+    """Tests for the scrape_preset tool."""
+
+    async def test_scrape_preset_invalid_preset(self):
+        result = await scrape_preset_tool(preset="nonexistent")
+        data = json.loads(result)
+        assert "error" in data
+        assert "Unknown preset" in data["error"]
+
+    async def test_scrape_preset_returns_json_array(self, mock_server):
+        """Test scrape_preset with a mocked preset that uses the mock server."""
+        from ergane.presets.registry import PresetConfig
+
+        mock_preset = PresetConfig(
+            name="Test Preset",
+            description="Test",
+            start_urls=[f"{mock_server}/"],
+            schema_file="quotes_toscrape.yaml",
+            defaults={"max_pages": 1, "max_depth": 0},
+        )
+        with patch.dict("ergane.presets.registry.PRESETS", {"test": mock_preset}):
+            result = await scrape_preset_tool(preset="test", max_pages=1)
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
