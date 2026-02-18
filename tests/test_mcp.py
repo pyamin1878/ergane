@@ -5,7 +5,7 @@ import json
 import pytest
 
 from ergane.mcp.resources import get_preset_resource
-from ergane.mcp.tools import list_presets_tool
+from ergane.mcp.tools import extract_tool, list_presets_tool
 
 
 class TestListPresets:
@@ -57,3 +57,45 @@ class TestPresetResources:
         assert "url" in data
         assert "fields" in data
         assert isinstance(data["fields"], list)
+
+
+class TestExtractTool:
+    """Tests for the extract (single-page) tool."""
+
+    async def test_extract_with_selectors(self, mock_server):
+        result = await extract_tool(
+            url=f"{mock_server}/",
+            selectors={"title": "h1"},
+        )
+        data = json.loads(result)
+        assert data["title"] == "Home"
+
+    async def test_extract_with_schema_yaml(self, mock_server):
+        schema_yaml = """
+name: TestSchema
+fields:
+  heading:
+    selector: "h1"
+    type: str
+"""
+        result = await extract_tool(
+            url=f"{mock_server}/page1",
+            schema_yaml=schema_yaml,
+        )
+        data = json.loads(result)
+        assert data["heading"] == "Page 1"
+
+    async def test_extract_invalid_url(self):
+        result = await extract_tool(
+            url="http://localhost:1/nonexistent",
+            selectors={"title": "h1"},
+        )
+        data = json.loads(result)
+        assert "error" in data
+
+    async def test_extract_no_selectors_or_schema(self, mock_server):
+        result = await extract_tool(url=f"{mock_server}/")
+        data = json.loads(result)
+        # Without selectors, returns basic page data
+        assert "url" in data
+        assert "title" in data
