@@ -8,7 +8,26 @@ from unittest.mock import patch
 import pytest
 
 from ergane.mcp.resources import get_preset_resource
-from ergane.mcp.tools import crawl_tool, extract_tool, list_presets_tool, scrape_preset_tool
+from ergane.mcp.tools import (
+    crawl_tool,
+    extract_tool,
+    list_presets_tool,
+    scrape_preset_tool,
+)
+
+
+class TestServerInit:
+    """Tests for MCP server initialization."""
+
+    def test_server_has_name(self):
+        from ergane.mcp import server
+        assert server.name == "ergane"
+
+    def test_server_import(self):
+        from ergane.mcp import run, server
+
+        assert server is not None
+        assert callable(run)
 
 
 class TestEntryPoints:

@@ -215,7 +215,10 @@ async def crawl_tool(
             writer.writerows(display_items)
             text = output.getvalue()
             if truncated:
-                text += f"\n# ... truncated ({len(items)} total items, showing first {MAX_ITEMS})"
+                text += (
+                    f"\n# ... truncated ({len(items)} total items,"
+                    f" showing first {MAX_ITEMS})"
+                )
             return text
 
         elif output_format == "jsonl":
@@ -223,7 +226,10 @@ async def crawl_tool(
             lines = [json.dumps(item, default=str) for item in display_items]
             text = "\n".join(lines)
             if truncated:
-                text += f"\n// truncated: {len(items)} total items, showing first {MAX_ITEMS}"
+                text += (
+                    f"\n// truncated: {len(items)} total items,"
+                    f" showing first {MAX_ITEMS}"
+                )
             return text
 
         else:  # json
