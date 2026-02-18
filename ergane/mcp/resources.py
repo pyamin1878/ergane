@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import yaml
-
-from ergane.presets import PRESETS, get_preset_schema_path
+from ergane.mcp.tools import _get_preset_fields
+from ergane.presets import PRESETS
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -28,10 +27,7 @@ async def get_preset_resource(name: str) -> str:
         raise ValueError(f"Unknown preset '{name}'. Available: {available}")
 
     preset = PRESETS[name]
-    schema_path = get_preset_schema_path(name)
-    with open(schema_path) as f:
-        schema_data = yaml.safe_load(f)
-    fields = list(schema_data.get("fields", {}).keys())
+    fields = _get_preset_fields(name)
 
     return json.dumps({
         "id": name,

@@ -44,7 +44,18 @@ def print_presets_table() -> None:
     click.echo("Example: ergane --preset quotes -o quotes.csv\n")
 
 
-@click.group(invoke_without_command=True)
+class DefaultGroup(click.Group):
+    """A Click group that defaults to 'crawl' when no subcommand is given."""
+
+    def parse_args(self, ctx, args):
+        # If the first arg looks like an option (starts with -), insert 'crawl'
+        if args and args[0].startswith("-"):
+            args = ["crawl"] + args
+        # If no args at all, show help (already handled by invoke_without_command)
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=DefaultGroup, invoke_without_command=True)
 @click.pass_context
 def cli(ctx):
     """Ergane - High-performance async web scraper."""

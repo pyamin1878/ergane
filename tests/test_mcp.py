@@ -6,6 +6,7 @@ import sys
 from unittest.mock import patch
 
 import pytest
+from click.testing import CliRunner
 
 from ergane.mcp.resources import get_preset_resource
 from ergane.mcp.tools import (
@@ -208,3 +209,21 @@ fields:
         data = json.loads(result)
         # With mock server we won't hit 50, just verify structure is valid
         assert isinstance(data, (list, dict))
+
+
+class TestCLI:
+    """Tests for the ergane CLI subcommands."""
+
+    def test_mcp_command_exists(self):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["mcp", "--help"])
+        assert result.exit_code == 0
+        assert "mcp" in result.output.lower()
+
+    def test_crawl_command_exists(self):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["crawl", "--help"])
+        assert result.exit_code == 0
+        assert "crawl" in result.output.lower()

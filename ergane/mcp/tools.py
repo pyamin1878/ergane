@@ -19,6 +19,17 @@ from ergane.schema.yaml_loader import load_schema_from_string, load_schema_from_
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
+MAX_RESULT_ITEMS = 50
+
+
+def _get_preset_fields(preset_id: str) -> list[str]:
+    """Load a preset's YAML schema and return its field names."""
+    schema_path = get_preset_schema_path(preset_id)
+    # Synchronous read is acceptable here — schema files are small local YAML files
+    with open(schema_path) as f:
+        schema_data = yaml.safe_load(f)
+    return list(schema_data.get("fields", {}).keys())
+
 
 async def list_presets_tool() -> str:
     """List all available scraping presets with their details.
@@ -28,10 +39,7 @@ async def list_presets_tool() -> str:
     """
     results = []
     for preset_id, preset in PRESETS.items():
-        schema_path = get_preset_schema_path(preset_id)
-        with open(schema_path) as f:
-            schema_data = yaml.safe_load(f)
-        fields = list(schema_data.get("fields", {}).keys())
+        fields = _get_preset_fields(preset_id)
         results.append({
             "id": preset_id,
             "name": preset.name,
@@ -144,10 +152,9 @@ async def scrape_preset_tool(
             results = await crawler.run()
 
         items = [r.model_dump(mode="json") for r in results]
-        MAX_ITEMS = 50
-        if len(items) > MAX_ITEMS:
+        if len(items) > MAX_RESULT_ITEMS:
             return json.dumps({
-                "items": items[:MAX_ITEMS],
+                "items": items[:MAX_RESULT_ITEMS],
                 "total": len(items),
                 "truncated": True,
             }, indent=2, default=str)
@@ -200,15 +207,14 @@ async def crawl_tool(
 
         items = [r.model_dump(mode="json") for r in results]
 
-        MAX_ITEMS = 50
-        truncated = len(items) > MAX_ITEMS
+        truncated = len(items) > MAX_RESULT_ITEMS
 
         if output_format == "csv":
             if not items:
                 return ""
             import csv
             import io
-            display_items = items[:MAX_ITEMS]
+            display_items = items[:MAX_RESULT_ITEMS]
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=display_items[0].keys())
             writer.writeheader()
@@ -217,25 +223,25 @@ async def crawl_tool(
             if truncated:
                 text += (
                     f"\n# ... truncated ({len(items)} total items,"
-                    f" showing first {MAX_ITEMS})"
+                    f" showing first {MAX_RESULT_ITEMS})"
                 )
             return text
 
         elif output_format == "jsonl":
-            display_items = items[:MAX_ITEMS]
+            display_items = items[:MAX_RESULT_ITEMS]
             lines = [json.dumps(item, default=str) for item in display_items]
             text = "\n".join(lines)
             if truncated:
                 text += (
                     f"\n// truncated: {len(items)} total items,"
-                    f" showing first {MAX_ITEMS}"
+                    f" showing first {MAX_RESULT_ITEMS}"
                 )
             return text
 
         else:  # json
             if truncated:
                 return json.dumps({
-                    "items": items[:MAX_ITEMS],
+                    "items": items[:MAX_RESULT_ITEMS],
                     "total": len(items),
                     "truncated": True,
                 }, indent=2, default=str)
