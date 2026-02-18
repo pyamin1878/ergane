@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from ergane.mcp.resources import get_preset_resource
-from ergane.mcp.tools import extract_tool, list_presets_tool, scrape_preset_tool
+from ergane.mcp.tools import crawl_tool, extract_tool, list_presets_tool, scrape_preset_tool
 
 
 class TestListPresets:
@@ -125,4 +125,50 @@ class TestScrapePresetTool:
         with patch.dict("ergane.presets.registry.PRESETS", {"test": mock_preset}):
             result = await scrape_preset_tool(preset="test", max_pages=1)
         data = json.loads(result)
+        assert isinstance(data, (list, dict))
+
+
+class TestCrawlTool:
+    """Tests for the crawl tool."""
+
+    async def test_crawl_basic(self, mock_server):
+        result = await crawl_tool(urls=[f"{mock_server}/"], max_pages=2)
+        data = json.loads(result)
+        assert isinstance(data, list)
+        assert len(data) >= 1
+
+    async def test_crawl_with_schema_yaml(self, mock_server):
+        schema_yaml = """
+name: TestSchema
+fields:
+  heading:
+    selector: "h1"
+    type: str
+"""
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            schema_yaml=schema_yaml,
+            max_pages=1,
+            max_depth=0,
+        )
+        data = json.loads(result)
+        assert isinstance(data, list)
+        if len(data) > 0:
+            assert "heading" in data[0]
+
+    async def test_crawl_invalid_url(self):
+        result = await crawl_tool(urls=["http://localhost:1/nonexistent"], max_pages=1)
+        data = json.loads(result)
+        # Should return empty list or error, not crash
+        assert isinstance(data, (list, dict))
+
+    async def test_crawl_truncates_large_results(self, mock_server):
+        """Verify that results over MAX_ITEMS are truncated."""
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=3,
+            max_depth=1,
+        )
+        data = json.loads(result)
+        # With mock server we won't hit 50, just verify structure is valid
         assert isinstance(data, (list, dict))

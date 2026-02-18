@@ -157,8 +157,91 @@ async def scrape_preset_tool(
         return json.dumps({"error": str(e)})
 
 
+async def crawl_tool(
+    urls: list[str],
+    schema_yaml: str | None = None,
+    max_pages: int = 10,
+    max_depth: int = 1,
+    concurrency: int = 5,
+    output_format: str = "json",
+) -> str:
+    """Crawl one or more websites and extract structured data.
+
+    Starts from the given URLs, follows links up to max_depth, and extracts
+    data from each page. Provide a YAML schema to extract specific fields
+    using CSS selectors.
+
+    Args:
+        urls: Starting URLs to crawl
+        schema_yaml: YAML schema for extraction (defines CSS selectors for fields)
+        max_pages: Maximum pages to crawl (default: 10)
+        max_depth: How deep to follow links (default: 1, 0 = seed URLs only)
+        concurrency: Number of concurrent requests (default: 5)
+        output_format: Output format — "json", "csv", or "jsonl" (default: "json")
+
+    Returns:
+        Extracted data as JSON array, CSV text, or JSONL text.
+    """
+    try:
+        schema = None
+        if schema_yaml:
+            schema = load_schema_from_string(schema_yaml)
+
+        async with Crawler(
+            urls=urls,
+            schema=schema,
+            max_pages=max_pages,
+            max_depth=max_depth,
+            concurrency=concurrency,
+            rate_limit=5.0,
+            timeout=60.0,
+        ) as crawler:
+            results = await crawler.run()
+
+        items = [r.model_dump(mode="json") for r in results]
+
+        MAX_ITEMS = 50
+        truncated = len(items) > MAX_ITEMS
+
+        if output_format == "csv":
+            if not items:
+                return ""
+            import csv
+            import io
+            display_items = items[:MAX_ITEMS]
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=display_items[0].keys())
+            writer.writeheader()
+            writer.writerows(display_items)
+            text = output.getvalue()
+            if truncated:
+                text += f"\n# ... truncated ({len(items)} total items, showing first {MAX_ITEMS})"
+            return text
+
+        elif output_format == "jsonl":
+            display_items = items[:MAX_ITEMS]
+            lines = [json.dumps(item, default=str) for item in display_items]
+            text = "\n".join(lines)
+            if truncated:
+                text += f"\n// truncated: {len(items)} total items, showing first {MAX_ITEMS}"
+            return text
+
+        else:  # json
+            if truncated:
+                return json.dumps({
+                    "items": items[:MAX_ITEMS],
+                    "total": len(items),
+                    "truncated": True,
+                }, indent=2, default=str)
+            return json.dumps(items, indent=2, default=str)
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Register all Ergane tools with the MCP server."""
     mcp.tool()(list_presets_tool)
     mcp.tool()(extract_tool)
     mcp.tool()(scrape_preset_tool)
+    mcp.tool()(crawl_tool)
