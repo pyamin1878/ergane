@@ -2,6 +2,9 @@
 
 import json
 
+import pytest
+
+from ergane.mcp.resources import get_preset_resource
 from ergane.mcp.tools import list_presets_tool
 
 
@@ -29,3 +32,28 @@ class TestListPresets:
         data = json.loads(result)
         ids = [p["id"] for p in data]
         assert "hacker-news" in ids
+
+
+class TestPresetResources:
+    """Tests for preset MCP resources."""
+
+    async def test_get_valid_preset(self):
+        result = await get_preset_resource("hacker-news")
+        data = json.loads(result)
+        assert data["name"] == "Hacker News"
+        assert "news.ycombinator.com" in data["url"]
+        assert "title" in data["fields"]
+
+    async def test_get_invalid_preset_raises(self):
+        with pytest.raises(ValueError, match="Unknown preset"):
+            await get_preset_resource("nonexistent")
+
+    async def test_preset_has_all_fields(self):
+        result = await get_preset_resource("quotes")
+        data = json.loads(result)
+        assert "id" in data
+        assert "name" in data
+        assert "description" in data
+        assert "url" in data
+        assert "fields" in data
+        assert isinstance(data["fields"], list)
