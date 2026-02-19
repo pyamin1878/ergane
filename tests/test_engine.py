@@ -145,6 +145,34 @@ class TestCrawlerContextManager:
             await c.run()
             assert c.pages_crawled == 2
 
+    @pytest.mark.asyncio
+    async def test_stats_after_crawl(self, engine_server: str):
+        """stats property returns correct counters after a crawl."""
+        async with Crawler(
+            urls=[f"{engine_server}/"],
+            max_pages=5,
+            max_depth=1,
+            rate_limit=100.0,
+            respect_robots_txt=False,
+        ) as c:
+            await c.run()
+
+        stats = c.stats
+        assert set(stats.keys()) == {
+            "pages_crawled",
+            "items_extracted",
+            "errors",
+            "cache_hits",
+            "pages_per_sec",
+            "elapsed",
+        }
+        assert stats["pages_crawled"] == 2
+        assert stats["items_extracted"] == 2
+        assert stats["errors"] == 0
+        assert stats["cache_hits"] == 0
+        assert stats["elapsed"] > 0
+        assert stats["pages_per_sec"] >= 0
+
 
 # ---------------------------------------------------------------------------
 # Convenience function

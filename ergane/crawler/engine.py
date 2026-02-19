@@ -117,6 +117,14 @@ class Crawler:
         )
         self._resume_from = resume_from
 
+        self._stats: dict[str, int] = {
+            "pages_crawled": 0,
+            "items_extracted": 0,
+            "errors": 0,
+            "cache_hits": 0,
+        }
+        self._start_time: float = 0.0
+
         self._fetcher: Fetcher | None = None
         self._owns_fetcher = False
 
@@ -127,6 +135,22 @@ class Crawler:
     @property
     def pages_crawled(self) -> int:
         return self._pages_crawled
+
+    @property
+    def stats(self) -> dict:
+        """Return a snapshot of crawl statistics.
+
+        Keys: pages_crawled, items_extracted, errors, cache_hits,
+              pages_per_sec (derived), elapsed (derived, seconds).
+        """
+        import time
+
+        elapsed = time.monotonic() - self._start_time if self._start_time else 0.0
+        return {
+            **self._stats,
+            "elapsed": elapsed,
+            "pages_per_sec": self._stats["pages_crawled"] / max(elapsed, 0.1),
+        }
 
     # -- Context manager --------------------------------------------------
 
@@ -232,12 +256,19 @@ class Crawler:
                 response = await self._fetcher.fetch(request)
                 async with self._counter_lock:
                     self._pages_crawled += 1
+                    self._stats["pages_crawled"] += 1
 
                 if response.error:
                     _logger.warning(
                         "Fetch error for %s: %s",
                         request.url, response.error,
                     )
+                    async with self._counter_lock:
+                        self._stats["errors"] += 1
+
+                if response.from_cache:
+                    async with self._counter_lock:
+                        self._stats["cache_hits"] += 1
 
                 # Apply response hooks
                 hooked_response = await self._apply_response_hooks(
@@ -262,6 +293,8 @@ class Crawler:
                     if pipeline is not None:
                         await pipeline.add(item)
                     await item_queue.put(item)
+                    async with self._counter_lock:
+                        self._stats["items_extracted"] += 1
 
                     # Queue discovered links
                     if request.depth < self._max_depth:
@@ -298,6 +331,9 @@ class Crawler:
 
     async def _crawl_iter(self) -> AsyncIterator[BaseModel]:
         """Core crawl loop. Yields extracted items as they arrive."""
+        import time
+        self._start_time = time.monotonic()
+
         # Resolve allowed domains from seed URLs
         for url in self._start_urls:
             self._allowed_domains.add(self._get_domain(url))
