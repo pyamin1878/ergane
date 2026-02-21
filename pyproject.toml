@@ -36,6 +36,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+js = [
+    "playwright>=1.40.0",
+]
 mcp = [
     "mcp[cli]>=1.0.0",
 ]
