@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
@@ -31,6 +31,13 @@ class CrawlConfig(BaseModel):
     cache_enabled: bool = Field(default=False)
     cache_dir: Path = Field(default=Path(".ergane_cache"))
     cache_ttl: int = Field(default=3600, description="Cache TTL in seconds")
+
+    # JavaScript rendering
+    js: bool = Field(default=False, description="Enable Playwright JS rendering")
+    js_wait: Literal["networkidle", "domcontentloaded", "load"] = Field(
+        default="networkidle",
+        description="Playwright page wait strategy",
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
