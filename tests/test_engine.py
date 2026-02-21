@@ -303,3 +303,25 @@ class TestCrawlerShutdown:
 
         assert crawler.pages_crawled < 1000
         assert len(results) >= 1
+
+
+# ---------------------------------------------------------------------------
+# JS rendering integration
+# ---------------------------------------------------------------------------
+
+async def test_crawler_uses_playwright_when_js_true(engine_server: str):
+    """Crawler instantiates PlaywrightFetcher when js=True."""
+    pytest.importorskip("playwright")
+    from ergane.crawler.playwright_fetcher import PlaywrightFetcher
+
+    async with Crawler(
+        urls=[f"{engine_server}/"],
+        max_pages=1,
+        max_depth=0,
+        js=True,
+        js_wait="load",
+        respect_robots_txt=False,
+    ) as c:
+        assert isinstance(c._fetcher, PlaywrightFetcher)
+        results = await c.run()
+    assert len(results) >= 1

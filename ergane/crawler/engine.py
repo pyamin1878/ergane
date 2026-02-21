@@ -77,6 +77,8 @@ class Crawler:
         resume_from: CrawlerCheckpoint | None = None,
         config: CrawlConfig | None = None,
         auth: AuthConfig | None = None,
+        js: bool = False,
+        js_wait: str = "networkidle",
     ) -> None:
         # Build CrawlConfig from kwargs or use provided one
         if config is not None:
@@ -92,6 +94,8 @@ class Crawler:
                 "cache_enabled": cache,
                 "cache_dir": cache_dir,
                 "cache_ttl": cache_ttl,
+                "js": js,
+                "js_wait": js_wait,
             }
             if user_agent is not None:
                 cfg_kwargs["user_agent"] = user_agent
@@ -168,7 +172,11 @@ class Crawler:
     # -- Context manager --------------------------------------------------
 
     async def __aenter__(self) -> Crawler:
-        self._fetcher = Fetcher(self._config)
+        if self._config.js:
+            from ergane.crawler.playwright_fetcher import PlaywrightFetcher
+            self._fetcher = PlaywrightFetcher(self._config)
+        else:
+            self._fetcher = Fetcher(self._config)
         await self._fetcher.__aenter__()
         self._owns_fetcher = True
         await self._auth_manager.ensure_authenticated(self._fetcher._client)
@@ -419,7 +427,11 @@ class Crawler:
         # Ensure we have a fetcher (user may not use context manager)
         owns_fetcher_locally = False
         if self._fetcher is None:
-            self._fetcher = Fetcher(self._config)
+            if self._config.js:
+                from ergane.crawler.playwright_fetcher import PlaywrightFetcher
+                self._fetcher = PlaywrightFetcher(self._config)
+            else:
+                self._fetcher = Fetcher(self._config)
             await self._fetcher.__aenter__()
             owns_fetcher_locally = True
 
