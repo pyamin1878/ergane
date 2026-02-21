@@ -8,17 +8,22 @@ The Crawler class lives in src.crawler.engine; this module adds:
 """
 
 import asyncio
+import datetime
 import signal
 from pathlib import Path
 
 import click
+from rich.console import Group
+from rich.live import Live
 from rich.progress import (
     BarColumn,
+    MofNCompleteColumn,
     Progress,
     SpinnerColumn,
-    TaskProgressColumn,
     TextColumn,
+    TimeRemainingColumn,
 )
+from rich.table import Table
 
 from ergane.config import load_config, merge_config
 from ergane.crawler.checkpoint import (
@@ -30,6 +35,32 @@ from ergane.crawler.engine import Crawler
 from ergane.logging import setup_logging
 from ergane.presets import get_preset, get_preset_schema_path, list_presets
 from ergane.schema import load_schema_from_yaml
+
+
+def _make_renderable(crawler, progress, task_id: int) -> Group:
+    """Build the Rich Live renderable from current crawler stats."""
+    stats = crawler.stats
+    progress.update(task_id, completed=stats["pages_crawled"])
+
+    elapsed = stats["elapsed"]
+    elapsed_str = str(datetime.timedelta(seconds=int(elapsed)))
+    speed_str = f"{stats['pages_per_sec']:.1f} p/s"
+
+    table = Table(box=None, padding=(0, 2), show_header=True, header_style="bold")
+    table.add_column("Extracted", style="green", justify="right")
+    table.add_column("Errors", style="red", justify="right")
+    table.add_column("Cache hits", style="cyan", justify="right")
+    table.add_column("Elapsed", justify="right")
+    table.add_column("Speed", justify="right")
+    table.add_row(
+        str(stats["items_extracted"]),
+        str(stats["errors"]),
+        str(stats["cache_hits"]),
+        elapsed_str,
+        speed_str,
+    )
+
+    return Group(progress, table)
 
 
 def print_presets_table() -> None:
@@ -376,18 +407,18 @@ def crawl(
                     SpinnerColumn(),
                     TextColumn("[bold blue]{task.description}"),
                     BarColumn(),
-                    TaskProgressColumn(),
-                    TextColumn("[cyan]{task.fields[url]}"),
+                    MofNCompleteColumn(),
+                    TimeRemainingColumn(),
                 )
-                with progress:
-                    task = progress.add_task(
-                        "Crawling", total=effective_max_pages, url=""
-                    )
-                    async for item in crawler.stream():
-                        truncated_url = getattr(item, "url", "")
-                        if len(truncated_url) > 50:
-                            truncated_url = truncated_url[:50] + "..."
-                        progress.update(task, advance=1, url=truncated_url)
+                task_id = progress.add_task("Crawling", total=effective_max_pages)
+
+                with Live(
+                    _make_renderable(crawler, progress, task_id),
+                    refresh_per_second=4,
+                    transient=False,
+                ) as live:
+                    async for _item in crawler.stream():
+                        live.update(_make_renderable(crawler, progress, task_id))
 
     asyncio.run(_run_with_progress())
 
