@@ -8,10 +8,9 @@ The Crawler class lives in src.crawler.engine; this module adds:
 """
 
 import asyncio
+import datetime
 import signal
 from pathlib import Path
-
-import datetime
 
 import click
 from rich.console import Group
@@ -418,7 +417,7 @@ def crawl(
                     refresh_per_second=4,
                     transient=False,
                 ) as live:
-                    async for item in crawler.stream():
+                    async for _item in crawler.stream():
                         live.update(_make_renderable(crawler, progress, task_id))
 
     asyncio.run(_run_with_progress())
