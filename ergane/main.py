@@ -222,6 +222,19 @@ def cli(ctx):
     default=None,
     help="Override auth mode from config (auto=headless, manual=visible browser).",
 )
+@click.option(
+    "--js",
+    is_flag=True,
+    default=False,
+    help="Enable JavaScript rendering via Playwright (requires ergane[js]).",
+)
+@click.option(
+    "--js-wait",
+    type=click.Choice(["networkidle", "domcontentloaded", "load"]),
+    default="networkidle",
+    show_default=True,
+    help="Playwright page wait strategy.",
+)
 def crawl(
     url: tuple[str, ...],
     output: str,
@@ -247,6 +260,8 @@ def crawl(
     cache_dir: Path,
     cache_ttl: int,
     auth_mode: str | None,
+    js: bool,
+    js_wait: str,
 ) -> None:
     """Crawl websites and extract data.
 
@@ -397,6 +412,8 @@ def crawl(
         checkpoint_path=opts.checkpoint_path or Path(CHECKPOINT_FILE),
         resume_from=resume_checkpoint,
         auth=opts.auth,
+        js=js,
+        js_wait=js_wait,
     )
 
     def handle_shutdown(signum, frame):

@@ -371,3 +371,20 @@ class TestCLI:
             ["crawl", "-u", f"{mock_server}/", "--timeout", "0"],
         )
         assert result.exit_code != 0
+
+    def test_js_flag_accepted(self):
+        """--js flag appears in crawl --help output."""
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["crawl", "--help"])
+        assert "--js" in result.output
+
+    def test_js_wait_choices(self):
+        """--js-wait rejects invalid strategies."""
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["crawl", "-u", "http://example.com", "--js-wait", "invalid"],
+        )
+        assert result.exit_code != 0
