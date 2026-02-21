@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any, Literal, Type, TypeVar
 
@@ -156,21 +157,41 @@ class Pipeline:
         """Write DataFrame to JSON array file."""
         df.write_json(path)
 
-    def _write_sqlite(self, df: pl.DataFrame, path: Path) -> None:
+    @staticmethod
+    def _polars_to_sqlite_type(dtype: pl.DataType) -> str:
+        """Map a Polars dtype to the closest SQLite column affinity."""
+        integer_types = (
+            pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+            pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+            pl.Boolean,  # SQLite has no BOOLEAN; use INTEGER (0/1)
+        )
+        float_types = (pl.Float32, pl.Float64)
+        if isinstance(dtype, integer_types):
+            return "INTEGER"
+        if isinstance(dtype, float_types):
+            return "REAL"
+        return "TEXT"
+
+    def _write_sqlite(
+        self, df: pl.DataFrame, path: Path, table_name: str | None = None
+    ) -> None:
         """Write DataFrame to SQLite database file."""
-        table_name = path.stem
+        if table_name is None:
+            table_name = path.stem
         rows = df.to_dicts()
         if not rows:
             return
-        columns = list(rows[0].keys())
-        col_defs = ", ".join(f'"{c}" TEXT' for c in columns)
+        columns = df.columns
+        col_defs = ", ".join(
+            f'"{c}" {self._polars_to_sqlite_type(df[c].dtype)}' for c in columns
+        )
         placeholders = ", ".join("?" for _ in columns)
         col_names = ", ".join(f'"{c}"' for c in columns)
         with sqlite3.connect(path) as conn:
             conn.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})')
             conn.executemany(
                 f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})',
-                [[str(row.get(c, "")) for c in columns] for row in rows],
+                [[row.get(c) for c in columns] for row in rows],
             )
 
     def _write_final(self, df: pl.DataFrame, path: Path) -> None:
@@ -184,7 +205,10 @@ class Pipeline:
         elif self.output_format == "jsonl":
             self._write_jsonl(df, path)
         elif self.output_format == "sqlite":
-            self._write_sqlite(df, path)
+            # Use the intended output path's stem as the table name so that
+            # atomic temp-file-then-rename doesn't produce a table named after
+            # the temporary file.
+            self._write_sqlite(df, path, table_name=self.output_path.stem)
         else:
             self._write_dataframe(df, path)
 
@@ -261,9 +285,22 @@ class Pipeline:
                 subset=["url"], keep="last"
             )
 
-        self._write_final(combined, self.output_path)
+        # Write to a temp file in the same directory first, then rename
+        # atomically so a crash mid-write doesn't corrupt the output or leave
+        # batch files dangling without a valid final file.
+        suffix = self.output_path.suffix or ".tmp"
+        with tempfile.NamedTemporaryFile(
+            dir=parent, suffix=suffix, delete=False
+        ) as tmp_f:
+            tmp_path = Path(tmp_f.name)
+        try:
+            self._write_final(combined, tmp_path)
+            tmp_path.replace(self.output_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
-        # Clean up batch files
+        # Batch files are removed only after the final file is safely in place.
         for f in batch_files:
             f.unlink()
 

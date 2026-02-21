@@ -1,7 +1,7 @@
 """Type coercion utilities for converting extracted strings to typed values."""
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Type
 
 
@@ -144,7 +144,13 @@ class TypeCoercer:
 
         for fmt in formats:
             try:
-                return datetime.strptime(value, fmt)
+                dt = datetime.strptime(value, fmt)
+                # Normalise to UTC so all extracted datetimes are timezone-aware.
+                # Format strings without a %z specifier produce naive datetimes;
+                # treat them as UTC rather than leaving them naive.
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
             except ValueError:
                 continue
 

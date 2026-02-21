@@ -114,34 +114,45 @@ class TestDatetimeCoercion:
     """Tests for datetime type coercion."""
 
     def test_iso_format(self):
-        """ISO 8601 format parses correctly."""
+        """ISO 8601 format parses correctly and is UTC-aware."""
+        from datetime import timezone
         result = TypeCoercer.coerce("2024-01-15T10:30:00", datetime)
-        assert result == datetime(2024, 1, 15, 10, 30, 0)
+        assert result == datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        assert result.tzinfo is not None
 
     def test_iso_format_with_microseconds(self):
         """ISO format with microseconds parses correctly."""
         result = TypeCoercer.coerce("2024-01-15T10:30:00.123456", datetime)
         assert result.microsecond == 123456
+        assert result.tzinfo is not None
 
     def test_iso_format_with_z(self):
-        """ISO format with Z suffix parses correctly."""
+        """ISO format with Z suffix parses correctly and is UTC-aware."""
+        from datetime import timezone
         result = TypeCoercer.coerce("2024-01-15T10:30:00Z", datetime)
-        assert result == datetime(2024, 1, 15, 10, 30, 0)
+        assert result == datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        assert result.tzinfo is not None
 
     def test_date_only(self):
-        """Date-only format parses correctly."""
+        """Date-only format parses correctly and is UTC-aware."""
+        from datetime import timezone
         result = TypeCoercer.coerce("2024-01-15", datetime)
-        assert result == datetime(2024, 1, 15, 0, 0, 0)
+        assert result == datetime(2024, 1, 15, 0, 0, 0, tzinfo=timezone.utc)
+        assert result.tzinfo is not None
 
     def test_datetime_with_space(self):
-        """Datetime with space separator parses correctly."""
+        """Datetime with space separator parses correctly and is UTC-aware."""
+        from datetime import timezone
         result = TypeCoercer.coerce("2024-01-15 10:30:00", datetime)
-        assert result == datetime(2024, 1, 15, 10, 30, 0)
+        assert result == datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        assert result.tzinfo is not None
 
     def test_us_date_format(self):
-        """US date format (MM/DD/YYYY) parses correctly."""
+        """US date format (MM/DD/YYYY) parses correctly and is UTC-aware."""
+        from datetime import timezone
         result = TypeCoercer.coerce("01/15/2024", datetime)
-        assert result == datetime(2024, 1, 15, 0, 0, 0)
+        assert result == datetime(2024, 1, 15, 0, 0, 0, tzinfo=timezone.utc)
+        assert result.tzinfo is not None
 
     def test_invalid_datetime_raises(self):
         """Invalid datetime string raises CoercionError."""

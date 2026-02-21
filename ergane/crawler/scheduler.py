@@ -18,6 +18,13 @@ def _request_to_dict(request: CrawlRequest) -> dict:
     }
 
 
+# Maximum number of normalized URLs to track in the seen-set.
+# Uses an insertion-ordered dict so the oldest entries can be evicted
+# when the limit is reached, keeping memory bounded for long crawls.
+_MAX_SEEN_URLS = 100_000
+_EVICT_BATCH = _MAX_SEEN_URLS // 10  # evict 10 % at a time
+
+
 class Scheduler:
     """URL frontier with deduplication and priority queue support."""
 
@@ -25,7 +32,9 @@ class Scheduler:
         self.config = config
         self._queue: list[tuple[int, int, CrawlRequest]] = []
         self._counter = 0
-        self._seen: set[str] = set()
+        # Ordered dict used as a bounded insertion-order set.
+        # Ordering allows O(1) eviction of the oldest entries.
+        self._seen: dict[str, None] = {}
         self._lock = asyncio.Lock()
         self._not_empty = asyncio.Event()
 
@@ -57,7 +66,21 @@ class Scheduler:
                 )
                 return False
 
-            self._seen.add(normalized)
+            # Evict oldest entries when the seen-set is full to keep memory
+            # bounded on very long crawls.  Evicted URLs may be re-crawled
+            # if encountered again, but this is the correct tradeoff versus
+            # an unbounded set that grows without limit.
+            if len(self._seen) >= _MAX_SEEN_URLS:
+                evict_keys = list(self._seen.keys())[:_EVICT_BATCH]
+                for k in evict_keys:
+                    del self._seen[k]
+                _logger.warning(
+                    "URL seen-set capped at %d; evicted %d oldest entries",
+                    _MAX_SEEN_URLS,
+                    _EVICT_BATCH,
+                )
+
+            self._seen[normalized] = None
             self._counter += 1
             heapq.heappush(
                 self._queue,
@@ -130,7 +153,7 @@ class Scheduler:
         Args:
             state: Dictionary with seen_urls and queue data.
         """
-        self._seen = set(state["seen_urls"])
+        self._seen = {url: None for url in state["seen_urls"]}
         self._queue = [
             (p, c, CrawlRequest(**r)) for p, c, r in state["queue"]
         ]

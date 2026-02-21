@@ -75,18 +75,23 @@ def print_presets_table() -> None:
     click.echo("Example: ergane --preset quotes -o quotes.csv\n")
 
 
+_GROUP_ONLY_FLAGS = {"--version", "--help", "-h"}
+
+
 class DefaultGroup(click.Group):
     """A Click group that defaults to 'crawl' when no subcommand is given."""
 
     def parse_args(self, ctx, args):
-        # If the first arg looks like an option (starts with -), insert 'crawl'
-        if args and args[0].startswith("-"):
+        # If the first arg is an option that belongs to the group itself
+        # (--version, --help) do NOT prepend 'crawl'; let the group handle it.
+        if args and args[0].startswith("-") and args[0] not in _GROUP_ONLY_FLAGS:
             args = ["crawl"] + args
         # If no args at all, show help (already handled by invoke_without_command)
         return super().parse_args(ctx, args)
 
 
 @click.group(cls=DefaultGroup, invoke_without_command=True)
+@click.version_option(version="0.7.0", prog_name="ergane")
 @click.pass_context
 def cli(ctx):
     """Ergane - High-performance async web scraper."""
@@ -297,20 +302,34 @@ def crawl(
     start_urls: list[str] = []
     output_schema = None
 
-    # Get effective values with defaults
-    effective_max_pages = merged.get("max_pages", 100) or 100
-    effective_max_depth = merged.get("max_depth", 3) or 3
-    effective_concurrency = merged.get("concurrency", 10) or 10
-    effective_rate_limit = merged.get("rate_limit", 10.0) or 10.0
-    effective_timeout = merged.get("timeout", 30.0) or 30.0
+    # Get effective values with defaults.
+    # Use explicit None checks (not `or default`) so that users who explicitly
+    # pass 0 or 0.0 reach the validation step rather than being silently
+    # replaced with the default value (because 0 is falsy in Python).
+    def _coalesce(val, default):
+        return val if val is not None else default
+
+    effective_max_pages = _coalesce(merged.get("max_pages"), 100)
+    effective_max_depth = _coalesce(merged.get("max_depth"), 3)
+    effective_concurrency = _coalesce(merged.get("concurrency"), 10)
+    effective_rate_limit = _coalesce(merged.get("rate_limit"), 10.0)
+    effective_timeout = _coalesce(merged.get("timeout"), 30.0)
     effective_proxy = merged.get("proxy")
-    effective_same_domain = merged.get("same_domain", True)
-    if effective_same_domain is None:
-        effective_same_domain = True
-    effective_respect_robots = merged.get("respect_robots_txt", True)
-    if effective_respect_robots is None:
-        effective_respect_robots = True
-    effective_output_format = merged.get("output_format", "auto") or "auto"
+    effective_same_domain = _coalesce(merged.get("same_domain"), True)
+    effective_respect_robots = _coalesce(merged.get("respect_robots_txt"), True)
+    effective_output_format = _coalesce(merged.get("output_format"), "auto")
+
+    # Validate effective parameter values before doing any real work.
+    if effective_max_pages <= 0:
+        raise click.ClickException("--max-pages must be a positive integer")
+    if effective_max_depth < 0:
+        raise click.ClickException("--max-depth must be 0 or greater")
+    if effective_concurrency <= 0:
+        raise click.ClickException("--concurrency must be a positive integer")
+    if effective_rate_limit <= 0:
+        raise click.ClickException("--rate-limit must be a positive number")
+    if effective_timeout <= 0:
+        raise click.ClickException("--timeout must be a positive number")
 
     if preset:
         try:

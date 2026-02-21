@@ -82,6 +82,8 @@ class Fetcher:
             )
         return self._domain_buckets[domain]
 
+    _ROBOTS_CACHE_MAX = 1000
+
     async def _get_robots(self, url: str) -> RobotFileParser | None:
         parsed = urlparse(url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
@@ -89,6 +91,13 @@ class Fetcher:
         async with self._robots_lock:
             if robots_url in self._robots_cache:
                 return self._robots_cache[robots_url]
+            # Evict all entries when cache is full to keep memory bounded.
+            if len(self._robots_cache) >= self._ROBOTS_CACHE_MAX:
+                self._robots_cache.clear()
+                _logger.debug(
+                    "robots.txt cache cleared (hit %d-entry limit)",
+                    self._ROBOTS_CACHE_MAX,
+                )
 
         try:
             resp = await self._client.get(
@@ -121,7 +130,17 @@ class Fetcher:
         if not self._client:
             raise RuntimeError("Fetcher not initialized. Use async with.")
 
-        # Check cache first
+        # Check robots.txt BEFORE the cache so that updated disallow rules are
+        # always respected even when a cached response exists for the URL.
+        if not await self.can_fetch(request.url):
+            return CrawlResponse(
+                url=request.url,
+                status_code=403,
+                error="Blocked by robots.txt",
+                request=request,
+            )
+
+        # Check cache after robots check
         if self.cache:
             cached = await self.cache.get(request.url)
             if cached:
@@ -136,14 +155,6 @@ class Fetcher:
 
         domain = self._get_domain(request.url)
         bucket = self._get_bucket(domain)
-
-        if not await self.can_fetch(request.url):
-            return CrawlResponse(
-                url=request.url,
-                status_code=403,
-                error="Blocked by robots.txt",
-                request=request,
-            )
 
         last_error: str | None = None
         for attempt in range(self.config.max_retries + 1):

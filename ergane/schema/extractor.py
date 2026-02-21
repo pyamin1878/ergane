@@ -6,8 +6,11 @@ from typing import Any, Type
 from pydantic import BaseModel
 from selectolax.parser import HTMLParser, Node
 
+from ergane.logging import get_logger
 from ergane.schema.base import FieldConfig, SchemaConfig
 from ergane.schema.coercion import CoercionError, TypeCoercer
+
+_logger = get_logger()
 
 
 class ExtractionError(Exception):
@@ -191,9 +194,12 @@ class SchemaExtractor:
                         raw_value, field_config.python_type, field_config.coerce
                     )
                     values.append(coerced)
-                except CoercionError:
-                    # Skip values that fail coercion in lists
-                    pass
+                except CoercionError as exc:
+                    _logger.warning(
+                        "Skipping list item for field '%s': coercion failed: %s",
+                        field_config.name,
+                        exc,
+                    )
         return values
 
     def _extract_nested(

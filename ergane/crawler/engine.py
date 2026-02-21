@@ -146,10 +146,15 @@ class Crawler:
         import time
 
         elapsed = time.monotonic() - self._start_time if self._start_time else 0.0
+        # Copy stats dict under lock to avoid torn reads across multiple fields.
+        # asyncio is cooperative so this is safe from a yield-in-between perspective,
+        # but an explicit snapshot makes the intent clear and future-proofs against
+        # thread-based executors.
+        stats_snapshot = dict(self._stats)
         return {
-            **self._stats,
+            **stats_snapshot,
             "elapsed": elapsed,
-            "pages_per_sec": self._stats["pages_crawled"] / max(elapsed, 0.1),
+            "pages_per_sec": stats_snapshot["pages_crawled"] / max(elapsed, 0.1),
         }
 
     # -- Context manager --------------------------------------------------
@@ -235,24 +240,32 @@ class Crawler:
         assert self._fetcher is not None
 
         while not self._shutdown_event.is_set():
-            async with self._counter_lock:
-                if self._pages_crawled >= self._max_pages:
-                    break
-
             request = await scheduler.get_nowait()
             if request is None:
+                async with self._counter_lock:
+                    # No work available; stop if page budget exhausted.
+                    if self._pages_crawled >= self._max_pages:
+                        break
                 await asyncio.sleep(0.1)
                 continue
 
-            # Apply request hooks
-            hooked_request = await self._apply_request_hooks(request)
-            if hooked_request is None:
-                continue
-            request = hooked_request
-
+            # Claim a page-budget slot atomically before fetching.
+            # Using (_pages_crawled + _active_tasks) prevents concurrent workers
+            # from all passing the check simultaneously and overshooting max_pages.
             async with self._counter_lock:
+                if self._pages_crawled + self._active_tasks >= self._max_pages:
+                    break
                 self._active_tasks += 1
+
             try:
+                # Apply request hooks.  When a hook returns None the request
+                # is skipped; the finally block will still decrement
+                # _active_tasks exactly once, so no manual decrement here.
+                hooked_request = await self._apply_request_hooks(request)
+                if hooked_request is None:
+                    continue
+                request = hooked_request
+
                 response = await self._fetcher.fetch(request)
                 async with self._counter_lock:
                     self._pages_crawled += 1
@@ -274,49 +287,54 @@ class Crawler:
                 hooked_response = await self._apply_response_hooks(
                     response,
                 )
-                if hooked_response is None:
-                    continue
-                response = hooked_response
+                if hooked_response is not None:
+                    response = hooked_response
 
-                if response.status_code == 200 and response.content:
-                    # Extract data
-                    if self._schema is not None:
-                        try:
-                            item = extract_typed_data(response, self._schema)
-                        except ExtractionError as e:
-                            _logger.error("Extraction error: %s", e)
-                            continue
-                    else:
-                        item = extract_data(response)
-
-                    # Send to pipeline and stream queue
-                    if pipeline is not None:
-                        await pipeline.add(item)
-                    await item_queue.put(item)
-                    async with self._counter_lock:
-                        self._stats["items_extracted"] += 1
-
-                    # Queue discovered links
-                    if request.depth < self._max_depth:
-                        if self._schema is None and hasattr(item, "links"):
-                            links = item.links  # type: ignore[attr-defined]
+                    if response.status_code == 200 and response.content:
+                        # Extract data
+                        if self._schema is not None:
+                            try:
+                                item = extract_typed_data(response, self._schema)
+                            except ExtractionError as e:
+                                _logger.error("Extraction error: %s", e)
+                                item = None
                         else:
-                            links = extract_links(response.content, response.url)
+                            item = extract_data(response)
 
-                        new_requests = []
-                        for link in links:
-                            domain = self._get_domain(link)
-                            if (self._same_domain
-                                    and domain not in self._allowed_domains):
-                                continue
-                            new_requests.append(
-                                CrawlRequest(
-                                    url=link,
-                                    depth=request.depth + 1,
-                                    priority=-request.depth - 1,
-                                )
+                        if item is not None:
+                            # Send to pipeline and stream queue
+                            if pipeline is not None:
+                                await pipeline.add(item)
+                            await item_queue.put(item)
+                            async with self._counter_lock:
+                                self._stats["items_extracted"] += 1
+
+                        # Queue discovered links
+                        if request.depth < self._max_depth:
+                            has_links = (
+                                self._schema is None
+                                and item is not None
+                                and hasattr(item, "links")
                             )
-                        await scheduler.add_many(new_requests)
+                            if has_links:
+                                links = item.links  # type: ignore[attr-defined]
+                            else:
+                                links = extract_links(response.content, response.url)
+
+                            new_requests = []
+                            for link in links:
+                                domain = self._get_domain(link)
+                                if (self._same_domain
+                                        and domain not in self._allowed_domains):
+                                    continue
+                                new_requests.append(
+                                    CrawlRequest(
+                                        url=link,
+                                        depth=request.depth + 1,
+                                        priority=-request.depth - 1,
+                                    )
+                                )
+                            await scheduler.add_many(new_requests)
 
                 _logger.debug(
                     "[%d/%d] %d %s",

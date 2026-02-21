@@ -211,6 +211,106 @@ fields:
         assert isinstance(data, (list, dict))
 
 
+class TestCrawlToolOutputFormats:
+    """Tests for CSV and JSONL output formats in crawl_tool."""
+
+    async def test_crawl_csv_output(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=1,
+            max_depth=0,
+            output_format="csv",
+        )
+        # Valid CSV should not start with '#' (that would break CSV parsers)
+        assert not result.startswith("#")
+        # Should have at least a header row
+        lines = [l for l in result.strip().splitlines() if l]
+        assert len(lines) >= 1
+
+    async def test_crawl_jsonl_output(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=1,
+            max_depth=0,
+            output_format="jsonl",
+        )
+        lines = [l for l in result.strip().splitlines() if l]
+        # Each line must be valid JSON (no '//' comments)
+        for line in lines:
+            parsed = json.loads(line)
+            assert isinstance(parsed, dict)
+
+    async def test_crawl_csv_empty(self):
+        result = await crawl_tool(
+            urls=["http://localhost:1/nonexistent"],
+            max_pages=1,
+            output_format="csv",
+        )
+        # Empty crawl → empty string (no crash)
+        assert isinstance(result, str)
+
+
+class TestErrorCodes:
+    """Tests for structured error_code in MCP error responses."""
+
+    async def test_extract_fetch_error_has_code(self):
+        result = await extract_tool(
+            url="http://localhost:1/nonexistent",
+            selectors={"title": "h1"},
+        )
+        data = json.loads(result)
+        assert "error_code" in data
+        assert data["error_code"] == "FETCH_ERROR"
+
+    async def test_scrape_invalid_preset_has_code(self):
+        result = await scrape_preset_tool(preset="nonexistent-preset")
+        data = json.loads(result)
+        assert "error_code" in data
+        assert data["error_code"] == "INVALID_PRESET"
+
+    async def test_extract_bad_schema_has_code(self, mock_server):
+        result = await extract_tool(
+            url=f"{mock_server}/",
+            schema_yaml="this: is: not: valid: yaml: ::::",
+        )
+        data = json.loads(result)
+        assert "error_code" in data
+        assert data["error_code"] == "SCHEMA_ERROR"
+
+    async def test_crawl_bad_schema_has_code(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            schema_yaml="this: is: not: valid: yaml: ::::",
+            max_pages=1,
+        )
+        data = json.loads(result)
+        assert "error_code" in data
+        assert data["error_code"] == "SCHEMA_ERROR"
+
+
+class TestTruncation:
+    """Tests for result truncation metadata."""
+
+    async def test_truncated_result_has_metadata(self, mock_server):
+        """When results exceed MAX_RESULT_ITEMS the envelope includes total."""
+        from ergane.mcp.tools import MAX_RESULT_ITEMS, _truncate_json
+
+        # Build a list larger than the limit
+        items = [{"i": i} for i in range(MAX_RESULT_ITEMS + 5)]
+        result = json.loads(_truncate_json(items, MAX_RESULT_ITEMS))
+        assert result["truncated"] is True
+        assert result["total"] == MAX_RESULT_ITEMS + 5
+        assert len(result["items"]) == MAX_RESULT_ITEMS
+
+    async def test_non_truncated_result_is_plain_list(self, mock_server):
+        from ergane.mcp.tools import MAX_RESULT_ITEMS, _truncate_json
+
+        items = [{"i": i} for i in range(3)]
+        result = json.loads(_truncate_json(items, MAX_RESULT_ITEMS))
+        assert isinstance(result, list)
+        assert len(result) == 3
+
+
 class TestCLI:
     """Tests for the ergane CLI subcommands."""
 
@@ -227,3 +327,47 @@ class TestCLI:
         result = runner.invoke(cli, ["crawl", "--help"])
         assert result.exit_code == 0
         assert "crawl" in result.output.lower()
+
+    def test_version_flag(self):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+        assert result.exit_code == 0
+        assert "0.7.0" in result.output
+
+    def test_negative_max_pages_rejected(self, mock_server):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["crawl", "-u", f"{mock_server}/", "--max-pages", "-1"],
+        )
+        assert result.exit_code != 0
+        assert "max-pages" in result.output.lower() or "Error" in result.output
+
+    def test_zero_concurrency_rejected(self, mock_server):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["crawl", "-u", f"{mock_server}/", "--concurrency", "0"],
+        )
+        assert result.exit_code != 0
+
+    def test_negative_rate_limit_rejected(self, mock_server):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["crawl", "-u", f"{mock_server}/", "--rate-limit", "-5"],
+        )
+        assert result.exit_code != 0
+
+    def test_negative_timeout_rejected(self, mock_server):
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["crawl", "-u", f"{mock_server}/", "--timeout", "0"],
+        )
+        assert result.exit_code != 0

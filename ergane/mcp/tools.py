@@ -22,6 +22,34 @@ if TYPE_CHECKING:
 MAX_RESULT_ITEMS = 50
 
 
+def _error(message: str, code: str) -> str:
+    """Return a JSON error response with a machine-readable code.
+
+    Codes let callers distinguish categories of failure:
+    - FETCH_ERROR      — network/HTTP problem
+    - INVALID_PRESET   — unknown preset name
+    - SCHEMA_ERROR     — YAML schema parse failure
+    - INVALID_PARAMS   — bad parameter values
+    - INTERNAL_ERROR   — unexpected exception
+    """
+    return json.dumps({"error": message, "error_code": code})
+
+
+def _truncate_json(items: list, max_items: int) -> str:
+    """Return a JSON string, truncating *items* to *max_items*.
+
+    When truncated, wraps the result in an envelope object with
+    ``total`` and ``truncated`` metadata so callers know the full count.
+    """
+    if len(items) <= max_items:
+        return json.dumps(items, indent=2, default=str)
+    return json.dumps(
+        {"items": items[:max_items], "total": len(items), "truncated": True},
+        indent=2,
+        default=str,
+    )
+
+
 def _get_preset_fields(preset_id: str) -> list[str]:
     """Load a preset's YAML schema and return its field names."""
     schema_path = get_preset_schema_path(preset_id)
@@ -86,7 +114,10 @@ async def extract_tool(
     try:
         schema = None
         if schema_yaml:
-            schema = load_schema_from_string(schema_yaml)
+            try:
+                schema = load_schema_from_string(schema_yaml)
+            except Exception as e:
+                return _error(f"Invalid schema YAML: {e}", "SCHEMA_ERROR")
         elif selectors:
             schema = _build_selector_schema(selectors)
 
@@ -101,10 +132,10 @@ async def extract_tool(
             response = await fetcher.fetch(request)
 
         if response.error:
-            return json.dumps({"error": f"Fetch failed: {response.error}"})
+            return _error(f"Fetch failed: {response.error}", "FETCH_ERROR")
 
         if not response.content:
-            return json.dumps({"error": "Empty response"})
+            return _error("Empty response", "FETCH_ERROR")
 
         if schema is not None:
             item = extract_typed_data(response, schema)
@@ -114,7 +145,7 @@ async def extract_tool(
         return json.dumps(item.model_dump(mode="json"), indent=2, default=str)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _error(str(e), "INTERNAL_ERROR")
 
 
 async def scrape_preset_tool(
@@ -137,6 +168,10 @@ async def scrape_preset_tool(
     """
     try:
         preset_config = get_preset(preset)
+    except KeyError as e:
+        return _error(str(e), "INVALID_PRESET")
+
+    try:
         schema_path = get_preset_schema_path(preset)
         schema = load_schema_from_yaml(schema_path)
 
@@ -152,16 +187,10 @@ async def scrape_preset_tool(
             results = await crawler.run()
 
         items = [r.model_dump(mode="json") for r in results]
-        if len(items) > MAX_RESULT_ITEMS:
-            return json.dumps({
-                "items": items[:MAX_RESULT_ITEMS],
-                "total": len(items),
-                "truncated": True,
-            }, indent=2, default=str)
-        return json.dumps(items, indent=2, default=str)
+        return _truncate_json(items, MAX_RESULT_ITEMS)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _error(str(e), "INTERNAL_ERROR")
 
 
 async def crawl_tool(
@@ -192,7 +221,10 @@ async def crawl_tool(
     try:
         schema = None
         if schema_yaml:
-            schema = load_schema_from_string(schema_yaml)
+            try:
+                schema = load_schema_from_string(schema_yaml)
+            except Exception as e:
+                return _error(f"Invalid schema YAML: {e}", "SCHEMA_ERROR")
 
         async with Crawler(
             urls=urls,
@@ -206,49 +238,28 @@ async def crawl_tool(
             results = await crawler.run()
 
         items = [r.model_dump(mode="json") for r in results]
-
-        truncated = len(items) > MAX_RESULT_ITEMS
+        display_items = items[:MAX_RESULT_ITEMS]
 
         if output_format == "csv":
             if not items:
                 return ""
             import csv
             import io
-            display_items = items[:MAX_RESULT_ITEMS]
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=display_items[0].keys())
             writer.writeheader()
             writer.writerows(display_items)
-            text = output.getvalue()
-            if truncated:
-                text += (
-                    f"\n# ... truncated ({len(items)} total items,"
-                    f" showing first {MAX_RESULT_ITEMS})"
-                )
-            return text
+            return output.getvalue()
 
         elif output_format == "jsonl":
-            display_items = items[:MAX_RESULT_ITEMS]
             lines = [json.dumps(item, default=str) for item in display_items]
-            text = "\n".join(lines)
-            if truncated:
-                text += (
-                    f"\n// truncated: {len(items)} total items,"
-                    f" showing first {MAX_RESULT_ITEMS}"
-                )
-            return text
+            return "\n".join(lines)
 
         else:  # json
-            if truncated:
-                return json.dumps({
-                    "items": items[:MAX_RESULT_ITEMS],
-                    "total": len(items),
-                    "truncated": True,
-                }, indent=2, default=str)
-            return json.dumps(items, indent=2, default=str)
+            return _truncate_json(items, MAX_RESULT_ITEMS)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _error(str(e), "INTERNAL_ERROR")
 
 
 def register_tools(mcp: FastMCP) -> None:
