@@ -28,13 +28,13 @@ class TestPlaywrightFetcherLifecycle:
         async with PlaywrightFetcher(js_config) as fetcher:
             assert fetcher._browser is not None
             assert fetcher._browser.is_connected()
-        # After exit, browser is disconnected
-        assert not fetcher._browser.is_connected()
+        # After exit, browser reference is cleaned up
+        assert fetcher._browser is None
 
     async def test_fetch_without_context_manager_raises(self, js_config):
-        """Calling _do_request() without context manager raises AssertionError."""
+        """Calling _do_request() without context manager raises RuntimeError."""
         fetcher = PlaywrightFetcher(js_config)
-        with pytest.raises((AssertionError, RuntimeError)):
+        with pytest.raises(RuntimeError):
             await fetcher._do_request("http://example.com", {})
 
 

@@ -44,6 +44,10 @@ class PlaywrightFetcher(Fetcher):
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(headless=True)
         except Exception as exc:
+            if self._playwright is not None:
+                await self._playwright.stop()
+                self._playwright = None
+            await super().__aexit__(None, None, None)
             raise RuntimeError(
                 f"Failed to launch Playwright browser. "
                 f"Did you run 'playwright install chromium'? Error: {exc}"
@@ -54,8 +58,7 @@ class PlaywrightFetcher(Fetcher):
     async def __aexit__(self, *args) -> None:
         if self._browser is not None:
             await self._browser.close()
-            # Keep the reference so callers can still call is_connected() to
-            # confirm the browser has shut down; it returns False after close().
+            self._browser = None
         if self._playwright is not None:
             await self._playwright.stop()
             self._playwright = None
@@ -71,7 +74,7 @@ class PlaywrightFetcher(Fetcher):
         exceptions so the parent fetch() retry logic applies unchanged.
         """
         if self._browser is None:
-            raise AssertionError("PlaywrightFetcher not initialized — use as async context manager")
+            raise RuntimeError("PlaywrightFetcher not initialized — use as async context manager")
 
         page = await self._browser.new_page(extra_http_headers=headers)
         try:
@@ -81,7 +84,7 @@ class PlaywrightFetcher(Fetcher):
                 timeout=self.config.request_timeout * 1000,  # ms
             )
             if response is None:
-                return 0, "", url, {}
+                raise httpx.HTTPError("Navigation returned no response")
 
             content = await page.content()
             status = response.status
