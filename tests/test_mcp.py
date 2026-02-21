@@ -311,6 +311,37 @@ class TestTruncation:
         assert len(result) == 3
 
 
+class TestMCPJsParams:
+    """Verify MCP tools accept js/js_wait parameters without error."""
+
+    async def test_extract_tool_accepts_js_false(self, mock_server):
+        """extract_tool works normally when js=False (default)."""
+        result = await extract_tool(
+            url=f"{mock_server}/",
+            selectors={"title": "h1"},
+            js=False,
+        )
+        data = json.loads(result)
+        assert "title" in data
+
+    async def test_crawl_tool_accepts_js_false(self, mock_server):
+        """crawl_tool works normally when js=False (default)."""
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=1,
+            max_depth=0,
+            js=False,
+        )
+        data = json.loads(result)
+        assert isinstance(data, list)
+
+    async def test_scrape_preset_tool_accepts_js_false(self):
+        """scrape_preset_tool accepts js param (invalid preset returns error with error_code)."""
+        result = await scrape_preset_tool(preset="nonexistent", js=False)
+        data = json.loads(result)
+        assert "error_code" in data
+
+
 class TestCLI:
     """Tests for the ergane CLI subcommands."""
 
