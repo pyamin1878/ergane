@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Type
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, create_model
@@ -16,7 +16,7 @@ class SchemaLoadError(Exception):
 
 
 # Mapping from YAML type names to Python types
-TYPE_MAP: dict[str, Type[Any]] = {
+TYPE_MAP: dict[str, type[Any]] = {
     "str": str,
     "string": str,
     "int": int,
@@ -28,7 +28,7 @@ TYPE_MAP: dict[str, Type[Any]] = {
 }
 
 
-def _parse_type(type_str: str) -> tuple[Type[Any], bool]:
+def _parse_type(type_str: str) -> tuple[type[Any], bool]:
     """Parse a type string into Python type and list flag.
 
     Args:
@@ -57,7 +57,7 @@ def _parse_type(type_str: str) -> tuple[Type[Any], bool]:
     return python_type, False
 
 
-def _create_field(field_config: dict[str, Any]) -> tuple[Type[Any], FieldInfo]:
+def _create_field(field_config: dict[str, Any]) -> tuple[type[Any], FieldInfo]:
     """Create a Pydantic field from YAML field configuration.
 
     Args:
@@ -90,14 +90,14 @@ def _create_field(field_config: dict[str, Any]) -> tuple[Type[Any], FieldInfo]:
 
     # Determine annotation
     if is_list:
-        annotation = list[python_type]
+        annotation = list[python_type]  # type: ignore[valid-type]
     else:
-        annotation = python_type
+        annotation = python_type  # type: ignore[misc]
 
     return annotation, field_info
 
 
-def _build_model_from_config(config: dict) -> Type[BaseModel]:
+def _build_model_from_config(config: dict) -> type[BaseModel]:
     """Build a Pydantic model from a parsed YAML config dict.
 
     Args:
@@ -115,7 +115,7 @@ def _build_model_from_config(config: dict) -> Type[BaseModel]:
     if not fields_config or not isinstance(fields_config, dict):
         raise SchemaLoadError("YAML must have a 'fields' dictionary")
 
-    field_definitions: dict[str, tuple[Type[Any], Any]] = {}
+    field_definitions: dict[str, tuple[type[Any], Any]] = {}
     field_definitions["url"] = (str, ...)
     field_definitions["crawled_at"] = (datetime, ...)
 
@@ -127,10 +127,10 @@ def _build_model_from_config(config: dict) -> Type[BaseModel]:
         annotation, field_info = _create_field(field_cfg)
         field_definitions[field_name] = (annotation, field_info)
 
-    return create_model(model_name, **field_definitions)
+    return create_model(model_name, **field_definitions)  # type: ignore[call-overload, no-any-return]
 
 
-def load_schema_from_yaml(path: str | Path) -> Type[BaseModel]:
+def load_schema_from_yaml(path: str | Path) -> type[BaseModel]:
     """Load a Pydantic model from a YAML schema definition.
 
     YAML format:
@@ -181,7 +181,7 @@ def load_schema_from_yaml(path: str | Path) -> Type[BaseModel]:
     return _build_model_from_config(config)
 
 
-def load_schema_from_string(yaml_content: str) -> Type[BaseModel]:
+def load_schema_from_string(yaml_content: str) -> type[BaseModel]:
     """Load a Pydantic model from a YAML string.
 
     Args:

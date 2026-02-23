@@ -25,6 +25,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from ergane._version import __version__
 from ergane.config import load_config, merge_config
 from ergane.crawler.checkpoint import (
     CHECKPOINT_FILE,
@@ -91,7 +92,7 @@ class DefaultGroup(click.Group):
 
 
 @click.group(cls=DefaultGroup, invoke_without_command=True)
-@click.version_option(version="0.7.0", prog_name="ergane")
+@click.version_option(version=__version__, prog_name="ergane")
 @click.pass_context
 def cli(ctx):
     """Ergane - High-performance async web scraper."""

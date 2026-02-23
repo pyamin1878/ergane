@@ -3,7 +3,7 @@ import json
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Any, Literal, Type, TypeVar
+from typing import Literal, TypeVar
 
 import polars as pl
 from pydantic import BaseModel
@@ -52,7 +52,7 @@ class Pipeline:
         self,
         config: CrawlConfig,
         output_path: str | Path,
-        output_schema: Type[BaseModel] | None = None,
+        output_schema: type[BaseModel] | None = None,
         output_format: OutputFormat = "auto",
     ):
         self.config = config
@@ -246,7 +246,15 @@ class Pipeline:
         Returns:
             Polars DataFrame with native Parquet types
         """
-        return ParquetSchemaMapper.models_to_dataframe(items, self.output_schema)
+        df = ParquetSchemaMapper.models_to_dataframe(items, self.output_schema)
+        # Apply the same 10,000-char cap as legacy mode to prevent unbounded
+        # string fields from bloating the output on large crawls.
+        str_cols = [col for col in df.columns if df[col].dtype == pl.Utf8]
+        if str_cols:
+            df = df.with_columns(
+                [pl.col(col).str.slice(0, 10000) for col in str_cols]
+            )
+        return df
 
     async def flush(self) -> None:
         """Flush any remaining items in the buffer."""
@@ -275,9 +283,21 @@ class Pipeline:
             batch_files[0].rename(self.output_path)
             return self.output_path
 
-        # Read and concatenate all batch files
-        dfs = [self._read_batch_file(f) for f in batch_files]
-        combined = pl.concat(dfs)
+        # Read and concatenate all batch files.
+        # Parquet: use the lazy API so Polars scans files without loading all
+        # DataFrames into RAM simultaneously.  Other formats fall back to an
+        # incremental concat that avoids holding both the per-file list and the
+        # combined frame in memory at the same time.
+        if self.output_format == "parquet":
+            combined = pl.scan_parquet(batch_files).collect()
+        else:
+            combined = pl.DataFrame()
+            for f in batch_files:
+                batch_df = self._read_batch_file(f)
+                if len(combined) > 0:
+                    combined = pl.concat([combined, batch_df])
+                else:
+                    combined = batch_df
 
         # Deduplicate by URL, keeping the last occurrence
         if "url" in combined.columns:

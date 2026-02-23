@@ -1,9 +1,7 @@
 """Tests for schema parsing functionality."""
 
 from datetime import datetime
-from typing import Optional
 
-import pytest
 from pydantic import BaseModel
 
 from ergane.schema import FieldConfig, SchemaConfig, selector

@@ -1,8 +1,7 @@
 """Schema configuration classes for parsing Pydantic models."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Type, get_args, get_origin
+from typing import Any, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -14,14 +13,14 @@ class FieldConfig:
     """Configuration for a single field extracted from Pydantic model metadata."""
 
     name: str
-    python_type: Type[Any]
+    python_type: type[Any]
     selector: str | None = None
     attr: str | None = None
     coerce: bool = False
     default: Any = ...
     is_list: bool = False
     is_optional: bool = False
-    inner_type: Type[Any] | None = None
+    inner_type: type[Any] | None = None
     is_nested_model: bool = False
 
     @property
@@ -34,11 +33,11 @@ class FieldConfig:
 class SchemaConfig:
     """Configuration extracted from a Pydantic model for schema-based extraction."""
 
-    model: Type[BaseModel]
+    model: type[BaseModel]
     fields: dict[str, FieldConfig] = field(default_factory=dict)
 
     @classmethod
-    def from_model(cls, model: Type[BaseModel]) -> "SchemaConfig":
+    def from_model(cls, model: type[BaseModel]) -> "SchemaConfig":
         """Parse a Pydantic model to extract field configurations."""
         config = cls(model=model)
 
@@ -98,7 +97,7 @@ class SchemaConfig:
         if extra and isinstance(extra, dict):
             selector = extra.get("selector")
             attr = extra.get("attr")
-            coerce = extra.get("coerce", False)
+            coerce = extra.get("coerce", False)  # type: ignore[assignment]
 
         # Get default value - normalize PydanticUndefined to ... for consistency
         default = field_info.default
@@ -109,9 +108,9 @@ class SchemaConfig:
 
         return FieldConfig(
             name=name,
-            python_type=python_type,
-            selector=selector,
-            attr=attr,
+            python_type=python_type,  # type: ignore[arg-type]
+            selector=selector,  # type: ignore[arg-type]
+            attr=attr,  # type: ignore[arg-type]
             coerce=coerce,
             default=default,
             is_list=is_list,
@@ -132,7 +131,7 @@ class SchemaConfig:
 
 
 def _is_union_type(origin: Any) -> bool:
-    """Check if origin is a Union type (handles both typing.Union and types.UnionType)."""
+    """Check if origin is a Union type (typing.Union or types.UnionType)."""
     import types
     import typing
 

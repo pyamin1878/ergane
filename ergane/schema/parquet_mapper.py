@@ -1,7 +1,7 @@
 """Maps Pydantic models to Polars schemas for native Parquet types."""
 
 from datetime import datetime
-from typing import Any, Type, get_args, get_origin
+from typing import Any
 
 import polars as pl
 from pydantic import BaseModel
@@ -13,16 +13,16 @@ class ParquetSchemaMapper:
     """Maps Pydantic model types to Polars data types for native Parquet storage."""
 
     # Mapping from Python types to Polars types
-    TYPE_MAP: dict[Type[Any], pl.DataType] = {
-        str: pl.Utf8,
-        int: pl.Int64,
-        float: pl.Float64,
-        bool: pl.Boolean,
+    TYPE_MAP: dict[type[Any], pl.DataType] = {
+        str: pl.Utf8,  # type: ignore[dict-item]
+        int: pl.Int64,  # type: ignore[dict-item]
+        float: pl.Float64,  # type: ignore[dict-item]
+        bool: pl.Boolean,  # type: ignore[dict-item]
         datetime: pl.Datetime("us"),
     }
 
     @classmethod
-    def get_polars_schema(cls, model: Type[BaseModel]) -> dict[str, pl.DataType]:
+    def get_polars_schema(cls, model: type[BaseModel]) -> dict[str, pl.DataType]:
         """Generate a Polars schema from a Pydantic model.
 
         Args:
@@ -41,7 +41,7 @@ class ParquetSchemaMapper:
         return polars_schema
 
     @classmethod
-    def _get_polars_type(cls, python_type: Type[Any], field_config: Any) -> pl.DataType:
+    def _get_polars_type(cls, python_type: type[Any], field_config: Any) -> pl.DataType:
         """Convert a Python type to the corresponding Polars type.
 
         Args:
@@ -64,7 +64,7 @@ class ParquetSchemaMapper:
         return cls._get_inner_polars_type(python_type)
 
     @classmethod
-    def _get_inner_polars_type(cls, python_type: Type[Any]) -> pl.DataType:
+    def _get_inner_polars_type(cls, python_type: type[Any]) -> pl.DataType:
         """Get Polars type for a non-container Python type.
 
         Args:
@@ -77,10 +77,10 @@ class ParquetSchemaMapper:
         if isinstance(python_type, type) and issubclass(python_type, BaseModel):
             return cls._get_struct_type(python_type)
 
-        return cls.TYPE_MAP.get(python_type, pl.Utf8)
+        return cls.TYPE_MAP.get(python_type, pl.Utf8)  # type: ignore[arg-type]
 
     @classmethod
-    def _get_struct_type(cls, model: Type[BaseModel]) -> pl.Struct:
+    def _get_struct_type(cls, model: type[BaseModel]) -> pl.Struct:
         """Create a Polars Struct type from a Pydantic model.
 
         Args:
@@ -127,13 +127,13 @@ class ParquetSchemaMapper:
 
     @classmethod
     def models_to_dataframe(
-        cls, instances: list[BaseModel], model: Type[BaseModel] | None = None
+        cls, instances: list[BaseModel], model: type[BaseModel] | None = None
     ) -> pl.DataFrame:
         """Convert list of Pydantic model instances to a Polars DataFrame.
 
         Args:
             instances: List of Pydantic model instances
-            model: Optional model class for schema (inferred from instances if not provided)
+            model: Optional model class for schema (inferred from instances if omitted)
 
         Returns:
             Polars DataFrame with native types

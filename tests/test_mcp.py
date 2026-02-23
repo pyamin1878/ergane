@@ -224,7 +224,7 @@ class TestCrawlToolOutputFormats:
         # Valid CSV should not start with '#' (that would break CSV parsers)
         assert not result.startswith("#")
         # Should have at least a header row
-        lines = [l for l in result.strip().splitlines() if l]
+        lines = [ln for ln in result.strip().splitlines() if ln]
         assert len(lines) >= 1
 
     async def test_crawl_jsonl_output(self, mock_server):
@@ -234,7 +234,7 @@ class TestCrawlToolOutputFormats:
             max_depth=0,
             output_format="jsonl",
         )
-        lines = [l for l in result.strip().splitlines() if l]
+        lines = [ln for ln in result.strip().splitlines() if ln]
         # Each line must be valid JSON (no '//' comments)
         for line in lines:
             parsed = json.loads(line)

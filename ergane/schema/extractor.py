@@ -1,7 +1,7 @@
 """Schema-based HTML extraction using selectolax."""
 
 from datetime import datetime, timezone
-from typing import Any, Type
+from typing import Any
 
 from pydantic import BaseModel
 from selectolax.parser import HTMLParser, Node
@@ -31,7 +31,7 @@ class SchemaExtractor:
         self.schema_config = schema_config
 
     @classmethod
-    def from_model(cls, model: Type[BaseModel]) -> "SchemaExtractor":
+    def from_model(cls, model: type[BaseModel]) -> "SchemaExtractor":
         """Create extractor from a Pydantic model class.
 
         Args:
@@ -233,7 +233,7 @@ class SchemaExtractor:
             try:
                 return self._extract_nested_item(nodes[0], nested_schema)
             except ExtractionError:
-                return self._handle_no_match(field_config)
+                return self._handle_no_match(field_config)  # type: ignore[no-any-return]
 
     def _extract_nested_item(
         self, node: Node, schema: SchemaConfig

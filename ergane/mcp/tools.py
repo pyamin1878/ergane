@@ -50,13 +50,27 @@ def _truncate_json(items: list, max_items: int) -> str:
     )
 
 
+def _load_all_preset_fields() -> dict[str, list[str]]:
+    """Preload field names for every preset at import time (static YAML files)."""
+    result: dict[str, list[str]] = {}
+    for preset_id in PRESETS:
+        try:
+            schema_path = get_preset_schema_path(preset_id)
+            with open(schema_path) as f:
+                schema_data = yaml.safe_load(f)
+            result[preset_id] = list(schema_data.get("fields", {}).keys())
+        except Exception:
+            result[preset_id] = []
+    return result
+
+
+# Loaded once at import; avoids repeated synchronous file I/O inside async callers.
+_PRESET_FIELDS: dict[str, list[str]] = _load_all_preset_fields()
+
+
 def _get_preset_fields(preset_id: str) -> list[str]:
-    """Load a preset's YAML schema and return its field names."""
-    schema_path = get_preset_schema_path(preset_id)
-    # Synchronous read is acceptable here — schema files are small local YAML files
-    with open(schema_path) as f:
-        schema_data = yaml.safe_load(f)
-    return list(schema_data.get("fields", {}).keys())
+    """Return cached field names for a preset."""
+    return _PRESET_FIELDS.get(preset_id, [])
 
 
 async def list_presets_tool() -> str:
@@ -81,15 +95,15 @@ async def list_presets_tool() -> str:
 def _build_selector_schema(selectors: dict[str, str]) -> type[BaseModel]:
     """Build a Pydantic model from a simple selector mapping."""
     field_definitions: dict[str, tuple[type, ...]] = {
-        "url": (str, ...),
-        "crawled_at": (datetime, ...),
+        "url": (str, ...),  # type: ignore[dict-item]
+        "crawled_at": (datetime, ...),  # type: ignore[dict-item]
     }
     for name, css in selectors.items():
         field_definitions[name] = (
             str,
             Field(json_schema_extra={"selector": css, "coerce": False, "attr": None}),
         )
-    return create_model("SelectorSchema", **field_definitions)
+    return create_model("SelectorSchema", **field_definitions)  # type: ignore[call-overload, no-any-return]
 
 
 async def extract_tool(

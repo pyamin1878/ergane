@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Type
+from typing import Any
 
 
 class CoercionError(Exception):
@@ -23,14 +23,17 @@ class TypeCoercer:
 
     @classmethod
     def coerce(
-        cls, value: str | list[str] | None, target_type: Type[Any], coerce_mode: bool = False
+        cls,
+        value: str | list[str] | None,
+        target_type: type[Any],
+        coerce_mode: bool = False,
     ) -> Any:
         """Coerce a string value to the target type.
 
         Args:
             value: String value to coerce, or list of strings, or None
             target_type: Target Python type
-            coerce_mode: If True, use aggressive coercion (e.g., extract numbers from "$19.99")
+            coerce_mode: If True, extract numbers aggressively (e.g. "$19.99" → 19.99)
 
         Returns:
             Coerced value of target type
@@ -85,8 +88,8 @@ class TypeCoercer:
                 # Handle comma-separated numbers
                 cleaned = value.replace(",", "")
                 return int(cleaned)
-            except ValueError:
-                raise CoercionError(f"Cannot convert to int: {value}")
+            except ValueError as exc:
+                raise CoercionError(f"Cannot convert to int: {value}") from exc
 
     @classmethod
     def _coerce_float(cls, value: str, coerce_mode: bool) -> float:
@@ -103,8 +106,8 @@ class TypeCoercer:
             try:
                 cleaned = value.replace(",", "")
                 return float(cleaned)
-            except ValueError:
-                raise CoercionError(f"Cannot convert to float: {value}")
+            except ValueError as exc:
+                raise CoercionError(f"Cannot convert to float: {value}") from exc
 
     @classmethod
     def _coerce_bool(cls, value: str) -> bool:

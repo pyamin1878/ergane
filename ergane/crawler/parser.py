@@ -1,4 +1,4 @@
-from typing import Any, Type
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from pydantic import BaseModel
@@ -6,7 +6,7 @@ from selectolax.parser import HTMLParser
 
 from ergane.logging import get_logger
 from ergane.models import CrawlResponse, ParsedItem
-from ergane.schema import SchemaConfig, SchemaExtractor
+from ergane.schema import SchemaExtractor
 
 _logger = get_logger()
 
@@ -160,7 +160,7 @@ def extract_data(
 
 def extract_typed_data(
     response: CrawlResponse,
-    schema: Type[BaseModel],
+    schema: type[BaseModel],
 ) -> BaseModel:
     """Extract data from a crawl response into a custom typed schema.
 

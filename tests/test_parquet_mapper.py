@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 
 import polars as pl
-import pytest
 from pydantic import BaseModel
 
 from ergane.schema import ParquetSchemaMapper, selector

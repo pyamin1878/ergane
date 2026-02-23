@@ -146,10 +146,13 @@ class Crawler:
         import time
 
         elapsed = time.monotonic() - self._start_time if self._start_time else 0.0
-        # Copy stats dict under lock to avoid torn reads across multiple fields.
-        # asyncio is cooperative so this is safe from a yield-in-between perspective,
-        # but an explicit snapshot makes the intent clear and future-proofs against
-        # thread-based executors.
+        # Snapshot is taken without the asyncio lock because this property is
+        # synchronous and asyncio.Lock cannot be acquired from sync code.  In
+        # CPython's cooperative event loop there are no preemption points within
+        # `dict(self._stats)`, so the snapshot is always consistent.  All
+        # mutations to `_stats` happen inside `async with self._counter_lock`
+        # blocks, making this read effectively serialised by the cooperative
+        # scheduler.
         stats_snapshot = dict(self._stats)
         return {
             **stats_snapshot,
@@ -213,7 +216,14 @@ class Crawler:
     ) -> CrawlRequest | None:
         current = request
         for hook in self._hooks:
-            maybe = await hook.on_request(current)
+            try:
+                maybe = await hook.on_request(current)
+            except Exception as exc:
+                _logger.error(
+                    "Hook %s.on_request raised an exception (skipping): %s",
+                    type(hook).__name__, exc,
+                )
+                continue
             if maybe is None:
                 return None
             current = maybe
@@ -224,7 +234,14 @@ class Crawler:
     ) -> CrawlResponse | None:
         current = response
         for hook in self._hooks:
-            maybe = await hook.on_response(current)
+            try:
+                maybe = await hook.on_response(current)
+            except Exception as exc:
+                _logger.error(
+                    "Hook %s.on_response raised an exception (skipping): %s",
+                    type(hook).__name__, exc,
+                )
+                continue
             if maybe is None:
                 return None
             current = maybe
@@ -317,7 +334,7 @@ class Crawler:
                                 and hasattr(item, "links")
                             )
                             if has_links:
-                                links = item.links  # type: ignore[attr-defined]
+                                links = item.links  # type: ignore[attr-defined,union-attr]
                             else:
                                 links = extract_links(response.content, response.url)
 
@@ -362,6 +379,7 @@ class Crawler:
         if self._resume_from is not None:
             cp = self._resume_from
             self._pages_crawled = cp.pages_crawled
+            self._stats["pages_crawled"] = cp.pages_crawled
             self._batch_number = cp.batch_number
             state = {
                 "seen_urls": cp.seen_urls,
@@ -439,7 +457,16 @@ class Crawler:
             self._shutdown_event.set()
             for worker in workers:
                 worker.cancel()
-            await asyncio.gather(*workers, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*workers, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                _logger.warning(
+                    "Worker cancellation timed out after 5 s; "
+                    "some tasks may still be running"
+                )
 
             # Drain items produced during shutdown
             while not item_queue.empty():

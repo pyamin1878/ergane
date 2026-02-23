@@ -1,6 +1,5 @@
 """Tests for the preset system."""
 
-from pathlib import Path
 
 import pytest
 

@@ -1,5 +1,6 @@
 import asyncio
 import heapq
+from collections import Counter
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 from ergane.logging import get_logger
@@ -72,12 +73,18 @@ class Scheduler:
             # an unbounded set that grows without limit.
             if len(self._seen) >= _MAX_SEEN_URLS:
                 evict_keys = list(self._seen.keys())[:_EVICT_BATCH]
+                domain_counts = Counter(urlparse(k).netloc for k in evict_keys)
+                top_domains_str = ", ".join(
+                    f"{d}({c})" for d, c in domain_counts.most_common(3)
+                )
                 for k in evict_keys:
                     del self._seen[k]
                 _logger.warning(
-                    "URL seen-set capped at %d; evicted %d oldest entries",
+                    "URL seen-set capped at %d; evicted %d oldest entries "
+                    "(top domains in evicted batch: %s)",
                     _MAX_SEEN_URLS,
                     _EVICT_BATCH,
+                    top_domains_str,
                 )
 
             self._seen[normalized] = None

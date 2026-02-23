@@ -91,15 +91,20 @@ class Fetcher:
         async with self._robots_lock:
             if robots_url in self._robots_cache:
                 return self._robots_cache[robots_url]
-            # Evict all entries when cache is full to keep memory bounded.
+            # Evict the single oldest entry (insertion-order) when the cache
+            # is full.  Clearing all entries at once would cause a thundering
+            # herd of simultaneous robots.txt re-fetches for every domain.
             if len(self._robots_cache) >= self._ROBOTS_CACHE_MAX:
-                self._robots_cache.clear()
+                oldest_key = next(iter(self._robots_cache))
+                del self._robots_cache[oldest_key]
                 _logger.debug(
-                    "robots.txt cache cleared (hit %d-entry limit)",
+                    "robots.txt cache: evicted %s (limit=%d)",
+                    oldest_key,
                     self._ROBOTS_CACHE_MAX,
                 )
 
         try:
+            assert self._client is not None, "Fetcher not initialized"
             resp = await self._client.get(
                 robots_url, timeout=self.config.request_timeout
             )

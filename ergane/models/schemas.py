@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Type
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
@@ -24,7 +24,7 @@ class CrawlConfig(BaseModel):
     user_agent: str = Field(default_factory=_default_user_agent)
     max_queue_size: int = Field(default=10000, gt=0)
     batch_size: int = Field(default=100, gt=0)
-    output_schema: Type[BaseModel] | None = Field(default=None)
+    output_schema: type[BaseModel] | None = Field(default=None)
     proxy: str | None = Field(default=None, description="HTTP/HTTPS proxy URL")
 
     # Caching
