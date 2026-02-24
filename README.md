@@ -409,7 +409,7 @@ Ergane separates the **engine** (pure async library) from its three interfaces: 
     │  Click options        │  │  from ergane import   │  │  FastMCP (stdio)     │
     │  Rich progress bar    │  │  Crawler / crawl()    │  │  4 tools + resources │
     │  Signal handling      │  │  stream()             │  │  ergane mcp          │
-    │  Config file merge    │  │                       │  │                      │
+    │  CrawlOptions config  │  │                       │  │                      │
     └──────────┬───────────┘  └────────────┬──────────┘  └──────────┬───────────┘
                │                           │                        │
                └───────────────┬───────────┴────────────────────────┘
@@ -424,11 +424,11 @@ Ergane separates the **engine** (pure async library) from its three interfaces: 
               ┌───────────────┼───────────────────┐
               │               │                   │
               ▼               ▼                   ▼
-      ┌──────────────┐ ┌───────────┐   ┌──────────────┐
-      │  Scheduler   │ │  Fetcher  │   │   Pipeline   │
-      │  URL frontier│ │  HTTP/2   │   │  Batch write │
-      │  dedup queue │ │  retries  │   │  multi-format│
-      └──────┬───────┘ └─────┬─────┘   └──────────────┘
+      ┌──────────────┐ ┌───────────┐   ┌──────────────────────┐
+      │  Scheduler   │ │  Fetcher  │   │   Pipeline           │
+      │  URL frontier│ │  HTTP/2   │   │  BatchWriter strategy│
+      │  dedup queue │ │  retries  │   │  per-format writers  │
+      └──────┬───────┘ └─────┬─────┘   └──────────────────────┘
              │               │
              ▼               ▼
   ┌──────────────────────────────────────────────────┐
@@ -438,7 +438,7 @@ Ergane separates the **engine** (pure async library) from its three interfaces: 
   │  2. hooks.on_request  → modify / skip             │
   │  3. Fetcher.fetch()   → CrawlResponse             │
   │  4. hooks.on_response → modify / discard          │
-  │  5. Parser.extract()  → Pydantic model            │
+  │  5. Parser.extract()  → Pydantic model / dict     │
   │  6. Pipeline.add()    → buffered output           │
   │  7. extract_links()   → new URLs → Scheduler      │
   └──────────────────────────────────────────────────┘
@@ -448,9 +448,17 @@ Ergane separates the **engine** (pure async library) from its three interfaces: 
   │                                                   │
   │  Cache ─── SQLite response cache with TTL         │
   │  Checkpoint ─ periodic JSON snapshots for resume  │
-  │  Schema ── YAML → dynamic Pydantic model + coerce │
+  │  Schema ── YAML → FieldConfig → extraction        │
   └──────────────────────────────────────────────────┘
 ```
+
+### Internal design notes
+
+**Config** — CLI flags and YAML config file are merged once into a `CrawlOptions` dataclass (in `ergane/config.py`) before any crawl work begins. All defaults live in one place; the config file sets the baseline and CLI flags override.
+
+**Schema pipeline** — YAML schemas are parsed directly into `FieldConfig` objects (selector, type, coerce, attr) which drive extraction and serialisation. Programmatic schemas defined with `selector()` on Pydantic models follow the same `FieldConfig` representation via `SchemaConfig.from_model()`.
+
+**Pipeline writers** — Each output format is handled by a dedicated `BatchWriter` subclass (`ParquetWriter`, `CsvWriter`, `ExcelWriter`, `JsonWriter`, `JsonlWriter`, `SqliteWriter`). Adding a new format means adding one class; the core `Pipeline` batching and consolidation logic is untouched.
 
 ## CLI Reference
 
