@@ -1,4 +1,5 @@
 from ergane._version import __version__
+from ergane.auth import AuthConfig, AuthenticationError, AuthManager
 from ergane.crawler import (
     BaseHook,
     Crawler,
@@ -16,6 +17,9 @@ from ergane.schema import SchemaExtractor, load_schema_from_yaml, selector
 
 __all__ = [
     "__version__",
+    "AuthConfig",
+    "AuthenticationError",
+    "AuthManager",
     "BaseHook",
     "crawl",
     "CrawlConfig",

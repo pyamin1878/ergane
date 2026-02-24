@@ -1,11 +1,15 @@
 """Configuration file loading for Ergane."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from ergane.auth.config import AuthConfig
 
 CONFIG_LOCATIONS = [
     Path.home() / ".ergane.yaml",
@@ -14,7 +18,7 @@ CONFIG_LOCATIONS = [
 ]
 
 # Top-level sections recognised in the config file.
-_VALID_SECTIONS = {"crawler", "defaults", "logging"}
+_VALID_SECTIONS = {"crawler", "defaults", "logging", "auth"}
 
 # Known keys within each section.
 _VALID_SECTION_KEYS: dict[str, set[str]] = {
@@ -29,6 +33,11 @@ _VALID_SECTION_KEYS: dict[str, set[str]] = {
         "checkpoint_interval", "output_format",
     },
     "logging": {"level", "file"},
+    "auth": {
+        "login_url", "mode", "username_selector", "password_selector",
+        "submit_selector", "username", "password", "check_url",
+        "session_file", "session_ttl", "wait_after_login",
+    },
 }
 
 _config_logger = logging.getLogger("ergane.config")
@@ -134,6 +143,9 @@ class CrawlOptions:
     log_level: str = "INFO"
     log_file: str | None = None
 
+    # Authentication
+    auth: AuthConfig | None = None
+
     @classmethod
     def from_sources(
         cls,
@@ -156,7 +168,8 @@ class CrawlOptions:
         checkpoint_path: Path | None = None,
         log_level: str | None = None,
         log_file: str | None = None,
-    ) -> "CrawlOptions":
+        auth_mode: str | None = None,
+    ) -> CrawlOptions:
         """Build CrawlOptions by merging file config with explicit CLI values.
 
         File config is applied first; non-None CLI values take precedence.
@@ -238,5 +251,13 @@ class CrawlOptions:
             opts.log_file = log_file
 
         opts.output = output
+
+        # Auth section — parsed separately (not flattened with crawler/defaults)
+        auth_raw = file_config.get("auth")
+        if auth_raw:
+            auth_dict = dict(auth_raw)
+            if auth_mode is not None:
+                auth_dict["mode"] = auth_mode
+            opts.auth = AuthConfig(**auth_dict)
 
         return opts
