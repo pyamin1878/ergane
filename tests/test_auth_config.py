@@ -1,11 +1,11 @@
 """Tests for ergane.auth.config.AuthConfig."""
 
-import os
 
 import pytest
 from pydantic import ValidationError
 
 from ergane.auth.config import AuthConfig
+from ergane.auth.errors import AuthenticationError
 
 
 class TestAuthConfig:
@@ -79,8 +79,6 @@ class TestAuthConfig:
         assert cfg.mode == "manual"
         assert cfg.username_selector is None
 
-
-from ergane.auth.errors import AuthenticationError
 
 
 class TestAuthenticationError:

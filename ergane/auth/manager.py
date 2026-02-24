@@ -83,10 +83,10 @@ class AuthManager:
         """Run the login flow in Playwright and return cookies."""
         try:
             from playwright.async_api import async_playwright
-        except ImportError:
+        except ImportError as exc:
             raise AuthenticationError(
                 "Auth requires playwright. Install with: uv pip install ergane[js]"
-            )
+            ) from exc
 
         async with async_playwright() as p:
             headless = config.mode == "auto"

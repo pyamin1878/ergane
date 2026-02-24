@@ -46,7 +46,7 @@ class AuthConfig(BaseModel):
     # Wait condition after login
     wait_after_login: str | None = Field(
         default=None,
-        description="Playwright wait: 'networkidle', 'domcontentloaded', 'load', or a CSS selector",
+        description="Playwright wait: 'networkidle', 'load', or CSS selector",
     )
 
     @model_validator(mode="after")

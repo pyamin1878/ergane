@@ -63,9 +63,10 @@ class TestEnsureAuthenticated:
     async def test_reuses_valid_session(self, auto_config, tmp_path):
         mgr = AuthManager(auto_config, session_dir=tmp_path)
         # Pre-populate session store with valid cookies
-        mgr._store.save([
-            {"name": "session_id", "value": "valid", "domain": "example.com", "path": "/"},
-        ])
+        mgr._store.save([{
+            "name": "session_id", "value": "valid",
+            "domain": "example.com", "path": "/",
+        }])
         client = httpx.AsyncClient()
         try:
             # Mock the validation request
@@ -80,7 +81,10 @@ class TestEnsureAuthenticated:
         client = httpx.AsyncClient()
         try:
             with patch.object(mgr, "_validate_session", return_value=False):
-                with patch.dict("sys.modules", {"playwright": None, "playwright.async_api": None}):
+                with patch.dict(
+                    "sys.modules",
+                    {"playwright": None, "playwright.async_api": None},
+                ):
                     with pytest.raises(AuthenticationError, match="playwright"):
                         await mgr.ensure_authenticated(client)
         finally:
