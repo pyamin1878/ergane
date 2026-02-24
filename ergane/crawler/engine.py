@@ -29,6 +29,8 @@ from ergane.crawler.checkpoint import (
     delete_checkpoint,
     save_checkpoint,
 )
+from ergane.auth.config import AuthConfig
+from ergane.auth.manager import AuthManager
 from ergane.crawler.fetcher import Fetcher
 from ergane.crawler.hooks import CrawlHook
 from ergane.crawler.parser import extract_data, extract_links, extract_typed_data
@@ -74,6 +76,7 @@ class Crawler:
         checkpoint_path: str | Path | None = None,
         resume_from: CrawlerCheckpoint | None = None,
         config: CrawlConfig | None = None,
+        auth: AuthConfig | None = None,
     ) -> None:
         # Build CrawlConfig from kwargs or use provided one
         if config is not None:
@@ -93,6 +96,8 @@ class Crawler:
             if user_agent is not None:
                 cfg_kwargs["user_agent"] = user_agent
             self._config = CrawlConfig(**cfg_kwargs)
+
+        self._auth_manager = AuthManager(auth)
 
         self._start_urls = urls
         self._schema = schema or self._config.output_schema
@@ -166,6 +171,7 @@ class Crawler:
         self._fetcher = Fetcher(self._config)
         await self._fetcher.__aenter__()
         self._owns_fetcher = True
+        await self._auth_manager.ensure_authenticated(self._fetcher._client)
         return self
 
     async def __aexit__(self, *exc) -> None:
