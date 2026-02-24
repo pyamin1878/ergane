@@ -32,6 +32,7 @@ dependencies = [
     "xlsxwriter>=3.1.0",
     "fastexcel>=0.7.0",
     "rich>=13.0.0",
+    "cryptography>=41.0.0",
 ]
 
 [project.optional-dependencies]
