@@ -26,7 +26,7 @@ from rich.progress import (
 from rich.table import Table
 
 from ergane._version import __version__
-from ergane.config import load_config, merge_config
+from ergane.config import CrawlOptions, load_config
 from ergane.crawler.checkpoint import (
     CHECKPOINT_FILE,
     CrawlerCheckpoint,
@@ -271,66 +271,47 @@ def crawl(
         print_presets_table()
         return
 
-    # Load config file
+    # Build unified options from file config + CLI args in one step
     file_config = load_config(config_file)
+    opts = CrawlOptions.from_sources(
+        file_config,
+        max_pages=max_pages,
+        max_depth=max_depth,
+        concurrency=concurrency,
+        rate_limit=rate_limit,
+        timeout=timeout,
+        same_domain=same_domain,
+        respect_robots_txt=not ignore_robots if ignore_robots is not None else None,
+        proxy=proxy,
+        output=output,
+        output_format=output_format,
+        cache=cache,
+        cache_dir=cache_dir,
+        cache_ttl=cache_ttl,
+        checkpoint_interval=checkpoint_interval,
+        checkpoint_path=Path(CHECKPOINT_FILE),
+        log_level=log_level,
+        log_file=log_file,
+    )
 
-    # Build CLI args dict
-    cli_args = {
-        "rate_limit": rate_limit,
-        "concurrency": concurrency,
-        "timeout": timeout,
-        "respect_robots_txt": not ignore_robots if ignore_robots is not None else None,
-        "user_agent": None,
-        "proxy": proxy,
-        "max_pages": max_pages,
-        "max_depth": max_depth,
-        "same_domain": same_domain,
-        "output_format": output_format,
-        "level": log_level,
-        "file": log_file,
-        "checkpoint_interval": checkpoint_interval,
-    }
-
-    # Merge config file with CLI args
-    merged = merge_config(file_config, cli_args)
-
-    # Setup logging
-    effective_log_level = merged.get("level", "INFO") or "INFO"
-    effective_log_file = merged.get("file")
-    logger = setup_logging(effective_log_level, effective_log_file)
-
-    # Handle preset configuration
-    start_urls: list[str] = []
-    output_schema = None
-
-    # Get effective values with defaults.
-    # Use explicit None checks (not `or default`) so that users who explicitly
-    # pass 0 or 0.0 reach the validation step rather than being silently
-    # replaced with the default value (because 0 is falsy in Python).
-    def _coalesce(val, default):
-        return val if val is not None else default
-
-    effective_max_pages = _coalesce(merged.get("max_pages"), 100)
-    effective_max_depth = _coalesce(merged.get("max_depth"), 3)
-    effective_concurrency = _coalesce(merged.get("concurrency"), 10)
-    effective_rate_limit = _coalesce(merged.get("rate_limit"), 10.0)
-    effective_timeout = _coalesce(merged.get("timeout"), 30.0)
-    effective_proxy = merged.get("proxy")
-    effective_same_domain = _coalesce(merged.get("same_domain"), True)
-    effective_respect_robots = _coalesce(merged.get("respect_robots_txt"), True)
-    effective_output_format = _coalesce(merged.get("output_format"), "auto")
+    # Setup logging from resolved options
+    logger = setup_logging(opts.log_level, opts.log_file)
 
     # Validate effective parameter values before doing any real work.
-    if effective_max_pages <= 0:
+    if opts.max_pages <= 0:
         raise click.ClickException("--max-pages must be a positive integer")
-    if effective_max_depth < 0:
+    if opts.max_depth < 0:
         raise click.ClickException("--max-depth must be 0 or greater")
-    if effective_concurrency <= 0:
+    if opts.concurrency <= 0:
         raise click.ClickException("--concurrency must be a positive integer")
-    if effective_rate_limit <= 0:
+    if opts.rate_limit <= 0:
         raise click.ClickException("--rate-limit must be a positive number")
-    if effective_timeout <= 0:
+    if opts.timeout <= 0:
         raise click.ClickException("--timeout must be a positive number")
+
+    # Resolve URLs and output schema
+    start_urls: list[str] = []
+    output_schema = None
 
     if preset:
         try:
@@ -348,11 +329,11 @@ def crawl(
             else:
                 start_urls = list(url)
 
-            # Apply preset defaults if not overridden via CLI
+            # Apply preset defaults when not explicitly overridden via CLI or file
             if max_pages is None and "max_pages" not in file_config.get("defaults", {}):
-                effective_max_pages = preset_config.defaults.get("max_pages", 100)
+                opts.max_pages = preset_config.defaults.get("max_pages", 100)
             if max_depth is None and "max_depth" not in file_config.get("defaults", {}):
-                effective_max_depth = preset_config.defaults.get("max_depth", 3)
+                opts.max_depth = preset_config.defaults.get("max_depth", 3)
 
         except KeyError as e:
             raise click.ClickException(str(e)) from e
@@ -378,36 +359,34 @@ def crawl(
         )
 
     # Check for resume checkpoint
-    checkpoint_path = Path(CHECKPOINT_FILE)
     resume_checkpoint: CrawlerCheckpoint | None = None
     if resume:
-        resume_checkpoint = load_checkpoint(checkpoint_path)
+        ckpt_path = opts.checkpoint_path or Path(CHECKPOINT_FILE)
+        resume_checkpoint = load_checkpoint(ckpt_path)
         if resume_checkpoint is None:
             logger.warning("No checkpoint found, starting fresh")
         else:
             logger.info(f"Found checkpoint from {resume_checkpoint.timestamp}")
 
-    effective_checkpoint_interval = merged.get("checkpoint_interval", 100) or 100
-
-    # Build the Crawler using the new engine API
+    # Build the Crawler
     crawler = Crawler(
         urls=start_urls,
         schema=output_schema,
-        concurrency=effective_concurrency,
-        max_pages=effective_max_pages,
-        max_depth=effective_max_depth,
-        rate_limit=effective_rate_limit,
-        timeout=effective_timeout,
-        same_domain=effective_same_domain,
-        respect_robots_txt=effective_respect_robots,
-        proxy=effective_proxy,
-        output=output,
-        output_format=effective_output_format,  # type: ignore[arg-type]
-        cache=cache,
-        cache_dir=cache_dir,
-        cache_ttl=cache_ttl,
-        checkpoint_interval=effective_checkpoint_interval,
-        checkpoint_path=checkpoint_path,
+        concurrency=opts.concurrency,
+        max_pages=opts.max_pages,
+        max_depth=opts.max_depth,
+        rate_limit=opts.rate_limit,
+        timeout=opts.timeout,
+        same_domain=opts.same_domain,
+        respect_robots_txt=opts.respect_robots_txt,
+        proxy=opts.proxy,
+        output=opts.output,
+        output_format=opts.output_format,  # type: ignore[arg-type]
+        cache=opts.cache,
+        cache_dir=opts.cache_dir,
+        cache_ttl=opts.cache_ttl,
+        checkpoint_interval=opts.checkpoint_interval,
+        checkpoint_path=opts.checkpoint_path or Path(CHECKPOINT_FILE),
         resume_from=resume_checkpoint,
     )
 
@@ -430,7 +409,7 @@ def crawl(
                     MofNCompleteColumn(),
                     TimeRemainingColumn(),
                 )
-                task_id = progress.add_task("Crawling", total=effective_max_pages)
+                task_id = progress.add_task("Crawling", total=opts.max_pages)
 
                 with Live(
                     _make_renderable(crawler, progress, task_id),

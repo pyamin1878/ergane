@@ -6,7 +6,8 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, create_model
-from pydantic.fields import FieldInfo
+
+from ergane.schema.base import FieldConfig
 
 
 class SchemaLoadError(Exception):
@@ -57,54 +58,65 @@ def _parse_type(type_str: str) -> tuple[type[Any], bool]:
     return python_type, False
 
 
-def _create_field(field_config: dict[str, Any]) -> tuple[type[Any], FieldInfo]:
-    """Create a Pydantic field from YAML field configuration.
+def _create_field_config(field_name: str, field_cfg: dict[str, Any]) -> FieldConfig:
+    """Create a FieldConfig directly from a YAML field definition.
+
+    This is the primary path: YAML → FieldConfig, with no Pydantic roundtrip.
 
     Args:
-        field_config: Field configuration dict from YAML
+        field_name: Name of the field
+        field_cfg: Field configuration dict from YAML
 
     Returns:
-        Tuple of (annotation, field_info)
+        FieldConfig instance
 
     Raises:
         SchemaLoadError: If field configuration is invalid
     """
-    # Get type
-    type_str = field_config.get("type", "str")
+    type_str = field_cfg.get("type", "str")
     python_type, is_list = _parse_type(type_str)
 
-    # Get selector configuration
-    css = field_config.get("selector")
+    css = field_cfg.get("selector")
     if css is None:
-        raise SchemaLoadError("Field must have a 'selector' key")
+        raise SchemaLoadError(f"Field '{field_name}' must have a 'selector' key")
 
-    attr = field_config.get("attr")
-    coerce = field_config.get("coerce", False)
-    default = field_config.get("default", ...)
+    attr = field_cfg.get("attr")
+    coerce = field_cfg.get("coerce", False)
+    default = field_cfg.get("default", ...)
 
-    # Create field with selector metadata (same as selector() helper)
-    field_info = Field(
+    # For list fields, python_type holds the element type
+    # (mirrors SchemaConfig._parse_field behaviour)
+    inner_type = python_type if is_list else None
+
+    return FieldConfig(
+        name=field_name,
+        python_type=python_type,
+        selector=css,
+        attr=attr,
+        coerce=coerce,
         default=default,
-        json_schema_extra={"selector": css, "coerce": coerce, "attr": attr},
+        is_list=is_list,
+        # YAML schemas don't express Optional[X];
+        # use default=None for optional behaviour instead
+        is_optional=False,
+        inner_type=inner_type,
+        is_nested_model=False,
     )
-
-    # Determine annotation
-    if is_list:
-        annotation = list[python_type]  # type: ignore[valid-type]
-    else:
-        annotation = python_type  # type: ignore[misc]
-
-    return annotation, field_info
 
 
 def _build_model_from_config(config: dict) -> type[BaseModel]:
     """Build a Pydantic model from a parsed YAML config dict.
 
+    Builds FieldConfig objects directly from YAML (the canonical representation),
+    then derives the Pydantic model from them.  The FieldConfig dict is cached on
+    the model class as ``__ergane_fields__`` so that SchemaConfig.from_model() can
+    skip re-parsing json_schema_extra on every access.
+
     Args:
         config: Parsed YAML dictionary with 'name' and 'fields' keys.
 
     Returns:
-        Dynamically created Pydantic model class.
+        Dynamically created Pydantic model class with __ergane_fields__ attached.
 
     Raises:
         SchemaLoadError: If config is missing required keys or fields are invalid.
@@ -115,19 +127,53 @@ def _build_model_from_config(config: dict) -> type[BaseModel]:
     if not fields_config or not isinstance(fields_config, dict):
         raise SchemaLoadError("YAML must have a 'fields' dictionary")
 
-    field_definitions: dict[str, tuple[type[Any], Any]] = {}
-    field_definitions["url"] = (str, ...)
-    field_definitions["crawled_at"] = (datetime, ...)
+    # Step 1: Build FieldConfig objects directly — the canonical representation.
+    field_configs: dict[str, FieldConfig] = {}
+    field_configs["url"] = FieldConfig(name="url", python_type=str, selector=None)
+    field_configs["crawled_at"] = FieldConfig(
+        name="crawled_at", python_type=datetime, selector=None
+    )
 
     for field_name, field_cfg in fields_config.items():
         if not isinstance(field_cfg, dict):
             raise SchemaLoadError(
                 f"Field '{field_name}' must be a dictionary, got {type(field_cfg)}"
             )
-        annotation, field_info = _create_field(field_cfg)
-        field_definitions[field_name] = (annotation, field_info)
+        field_configs[field_name] = _create_field_config(field_name, field_cfg)
 
-    return create_model(model_name, **field_definitions)  # type: ignore[call-overload, no-any-return]
+    # Step 2: Derive Pydantic field definitions from the FieldConfig objects.
+    # json_schema_extra is kept so that the existing SchemaConfig slow path
+    # still produces correct results if called on a model missing __ergane_fields__.
+    pydantic_fields: dict[str, tuple[type[Any], Any]] = {}
+    pydantic_fields["url"] = (str, ...)
+    pydantic_fields["crawled_at"] = (datetime, ...)
+
+    for fname, fconfig in field_configs.items():
+        if fname in ("url", "crawled_at"):
+            continue
+
+        if fconfig.is_list:
+            annotation = list[fconfig.python_type]  # type: ignore[valid-type]
+        else:
+            annotation = fconfig.python_type  # type: ignore[misc]
+
+        field_info = Field(
+            default=fconfig.default,
+            json_schema_extra={
+                "selector": fconfig.selector,
+                "coerce": fconfig.coerce,
+                "attr": fconfig.attr,
+            },
+        )
+        pydantic_fields[fname] = (annotation, field_info)
+
+    model = create_model(model_name, **pydantic_fields)  # type: ignore[call-overload, no-any-return]
+
+    # Step 3: Cache FieldConfig objects on the model class.  SchemaConfig.from_model()
+    # checks for this attribute first to avoid re-parsing json_schema_extra.
+    model.__ergane_fields__ = field_configs  # type: ignore[attr-defined]
+
+    return model  # type: ignore[return-value]
 
 
 def load_schema_from_yaml(path: str | Path) -> type[BaseModel]:

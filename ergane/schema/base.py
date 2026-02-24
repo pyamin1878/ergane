@@ -38,9 +38,22 @@ class SchemaConfig:
 
     @classmethod
     def from_model(cls, model: type[BaseModel]) -> "SchemaConfig":
-        """Parse a Pydantic model to extract field configurations."""
-        config = cls(model=model)
+        """Parse a Pydantic model to extract field configurations.
 
+        Fast path: if the model was built by yaml_loader it carries a
+        ``__ergane_fields__`` class attribute with pre-computed FieldConfig
+        objects — use those directly to skip re-parsing json_schema_extra.
+
+        Slow path: iterate model_fields and parse json_schema_extra metadata
+        (used for programmatic schemas defined with the selector() helper).
+        """
+        cached: dict[str, FieldConfig] | None = getattr(
+            model, "__ergane_fields__", None
+        )
+        if cached is not None:
+            return cls(model=model, fields=dict(cached))
+
+        config = cls(model=model)
         for field_name, field_info in model.model_fields.items():
             field_config = cls._parse_field(field_name, field_info)
             config.fields[field_name] = field_config
