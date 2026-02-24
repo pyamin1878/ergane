@@ -131,6 +131,26 @@ class Fetcher:
 
         return robots.can_fetch(self.config.user_agent, url)
 
+    async def _do_request(
+        self, url: str, headers: dict
+    ) -> tuple[int, str, str, dict[str, str]]:
+        """Perform the actual network request.
+
+        Returns:
+            (status_code, content, final_url, response_headers)
+
+        Raises:
+            httpx.TimeoutException: on timeout
+            httpx.HTTPError: on other HTTP errors
+        """
+        resp = await self._client.get(url, headers=headers)
+        return (
+            resp.status_code,
+            resp.text if resp.status_code == 200 else "",
+            str(resp.url),
+            dict(resp.headers),
+        )
+
     async def fetch(self, request: CrawlRequest) -> CrawlResponse:
         if not self._client:
             raise RuntimeError("Fetcher not initialized. Use async with.")
@@ -167,12 +187,14 @@ class Fetcher:
 
             try:
                 extra_headers = request.metadata.get("headers", {})
-                resp = await self._client.get(request.url, headers=extra_headers)
+                status_code, content, final_url, resp_headers = await self._do_request(
+                    request.url, extra_headers
+                )
                 response = CrawlResponse(
-                    url=str(resp.url),
-                    status_code=resp.status_code,
-                    content=resp.text if resp.status_code == 200 else "",
-                    headers=dict(resp.headers),
+                    url=final_url,
+                    status_code=status_code,
+                    content=content,
+                    headers=resp_headers,
                     request=request,
                 )
 

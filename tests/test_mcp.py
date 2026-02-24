@@ -311,6 +311,40 @@ class TestTruncation:
         assert len(result) == 3
 
 
+class TestMCPJsParams:
+    """Verify MCP tools accept js/js_wait parameters without error."""
+
+    async def test_extract_tool_accepts_js_false(self, mock_server):
+        """extract_tool works normally when js=False (default)."""
+        result = await extract_tool(
+            url=f"{mock_server}/",
+            selectors={"title": "h1"},
+            js=False,
+        )
+        data = json.loads(result)
+        assert "title" in data
+
+    async def test_crawl_tool_accepts_js_false(self, mock_server):
+        """crawl_tool works normally when js=False (default)."""
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=1,
+            max_depth=0,
+            js=False,
+        )
+        data = json.loads(result)
+        assert isinstance(data, list)
+
+    async def test_scrape_preset_tool_accepts_js_false(self):
+        """scrape_preset_tool accepts js param.
+
+        Invalid preset returns error with error_code.
+        """
+        result = await scrape_preset_tool(preset="nonexistent", js=False)
+        data = json.loads(result)
+        assert "error_code" in data
+
+
 class TestCLI:
     """Tests for the ergane CLI subcommands."""
 
@@ -333,7 +367,7 @@ class TestCLI:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.7.0" in result.output
+        assert "0.7.1" in result.output
 
     def test_negative_max_pages_rejected(self, mock_server):
         from ergane.main import cli
@@ -369,5 +403,22 @@ class TestCLI:
         result = runner.invoke(
             cli,
             ["crawl", "-u", f"{mock_server}/", "--timeout", "0"],
+        )
+        assert result.exit_code != 0
+
+    def test_js_flag_accepted(self):
+        """--js flag appears in crawl --help output."""
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["crawl", "--help"])
+        assert "--js" in result.output
+
+    def test_js_wait_choices(self):
+        """--js-wait rejects invalid strategies."""
+        from ergane.main import cli
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["crawl", "-u", "http://example.com", "--js-wait", "invalid"],
         )
         assert result.exit_code != 0

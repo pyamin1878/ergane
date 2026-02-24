@@ -10,7 +10,6 @@ import yaml
 from pydantic import BaseModel, Field, create_model
 
 from ergane.crawler.engine import Crawler
-from ergane.crawler.fetcher import Fetcher
 from ergane.crawler.parser import extract_data, extract_typed_data
 from ergane.models import CrawlConfig, CrawlRequest
 from ergane.presets import PRESETS, get_preset, get_preset_schema_path
@@ -20,6 +19,15 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 MAX_RESULT_ITEMS = 50
+
+
+def _get_fetcher_cls(js: bool):
+    """Return PlaywrightFetcher if js=True, else Fetcher."""
+    if js:
+        from ergane.crawler.playwright_fetcher import PlaywrightFetcher
+        return PlaywrightFetcher
+    from ergane.crawler.fetcher import Fetcher
+    return Fetcher
 
 
 def _error(message: str, code: str) -> str:
@@ -110,6 +118,8 @@ async def extract_tool(
     url: str,
     selectors: dict[str, str] | None = None,
     schema_yaml: str | None = None,
+    js: bool = False,
+    js_wait: str = "networkidle",
 ) -> str:
     """Extract structured data from a single web page.
 
@@ -139,10 +149,13 @@ async def extract_tool(
             max_requests_per_second=10.0,
             max_concurrent_requests=1,
             request_timeout=60.0,
+            js=js,
+            js_wait=js_wait,
         )
         request = CrawlRequest(url=url, depth=0, priority=0)
 
-        async with Fetcher(config) as fetcher:
+        fetcher_cls = _get_fetcher_cls(js)
+        async with fetcher_cls(config) as fetcher:
             response = await fetcher.fetch(request)
 
         if response.error:
@@ -165,6 +178,8 @@ async def extract_tool(
 async def scrape_preset_tool(
     preset: str,
     max_pages: int = 5,
+    js: bool = False,
+    js_wait: str = "networkidle",
 ) -> str:
     """Scrape a website using a built-in preset — zero configuration needed.
 
@@ -197,6 +212,8 @@ async def scrape_preset_tool(
             concurrency=5,
             rate_limit=5.0,
             timeout=60.0,
+            js=js,
+            js_wait=js_wait,
         ) as crawler:
             results = await crawler.run()
 
@@ -214,6 +231,8 @@ async def crawl_tool(
     max_depth: int = 1,
     concurrency: int = 5,
     output_format: str = "json",
+    js: bool = False,
+    js_wait: str = "networkidle",
 ) -> str:
     """Crawl one or more websites and extract structured data.
 
@@ -248,6 +267,8 @@ async def crawl_tool(
             concurrency=concurrency,
             rate_limit=5.0,
             timeout=60.0,
+            js=js,
+            js_wait=js_wait,
         ) as crawler:
             results = await crawler.run()
 
