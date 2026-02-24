@@ -23,14 +23,14 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
+from ergane.auth.config import AuthConfig
+from ergane.auth.manager import AuthManager
 from ergane.crawler.checkpoint import (
     CrawlerCheckpoint,
     create_checkpoint,
     delete_checkpoint,
     save_checkpoint,
 )
-from ergane.auth.config import AuthConfig
-from ergane.auth.manager import AuthManager
 from ergane.crawler.fetcher import Fetcher
 from ergane.crawler.hooks import CrawlHook
 from ergane.crawler.parser import extract_data, extract_links, extract_typed_data

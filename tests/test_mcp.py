@@ -336,7 +336,10 @@ class TestMCPJsParams:
         assert isinstance(data, list)
 
     async def test_scrape_preset_tool_accepts_js_false(self):
-        """scrape_preset_tool accepts js param (invalid preset returns error with error_code)."""
+        """scrape_preset_tool accepts js param.
+
+        Invalid preset returns error with error_code.
+        """
         result = await scrape_preset_tool(preset="nonexistent", js=False)
         data = json.loads(result)
         assert "error_code" in data
@@ -364,7 +367,7 @@ class TestCLI:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.7.0" in result.output
+        assert "0.7.1" in result.output
 
     def test_negative_max_pages_rejected(self, mock_server):
         from ergane.main import cli

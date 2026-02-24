@@ -7,10 +7,14 @@ import httpx
 try:
     from playwright.async_api import (
         Browser,
-        Error as PlaywrightError,
         Playwright,
-        TimeoutError as PlaywrightTimeoutError,
         async_playwright,
+    )
+    from playwright.async_api import (
+        Error as PlaywrightError,
+    )
+    from playwright.async_api import (
+        TimeoutError as PlaywrightTimeoutError,
     )
 except ImportError as exc:
     raise ImportError(
@@ -37,7 +41,7 @@ class PlaywrightFetcher(Fetcher):
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
 
-    async def __aenter__(self) -> "PlaywrightFetcher":
+    async def __aenter__(self) -> PlaywrightFetcher:
         # Initialize httpx client (needed for robots.txt fetching in parent)
         await super().__aenter__()
         try:
@@ -74,7 +78,10 @@ class PlaywrightFetcher(Fetcher):
         exceptions so the parent fetch() retry logic applies unchanged.
         """
         if self._browser is None:
-            raise RuntimeError("PlaywrightFetcher not initialized — use as async context manager")
+            raise RuntimeError(
+                "PlaywrightFetcher not initialized"
+                " — use as async context manager"
+            )
 
         page = await self._browser.new_page(extra_http_headers=headers)
         try:

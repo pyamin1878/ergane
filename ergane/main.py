@@ -472,8 +472,7 @@ def test_schema(url: str, schema: Path) -> None:
     from rich.console import Console
     from rich.table import Table
 
-    from ergane.schema import SchemaExtractor
-    from ergane.schema import load_schema_from_yaml
+    from ergane.schema import SchemaExtractor, load_schema_from_yaml
 
     console = Console()
 
@@ -553,7 +552,11 @@ def auth():
 
 
 @auth.command("login")
-@click.option("--config-file", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option(
+    "--config-file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+)
 @click.option("--auth-mode", type=click.Choice(["auto", "manual"]), default=None)
 def auth_login(config_file, auth_mode):
     """Run login flow and save session (without crawling)."""

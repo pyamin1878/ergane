@@ -4,7 +4,10 @@ import pytest
 
 pytest.importorskip(
     "playwright",
-    reason="playwright not installed; run: pip install ergane[js] && playwright install chromium",
+    reason=(
+        "playwright not installed; run: "
+        "pip install ergane[js] && playwright install chromium"
+    ),
 )
 
 from ergane.crawler.playwright_fetcher import PlaywrightFetcher

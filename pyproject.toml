@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ergane"
-version = "0.7.0"
+version = "0.7.1"
 description = "High-performance async web scraper with selectolax parsing"
 authors = [{name = "pyamin1878"}]
 license = {text = "MIT"}
