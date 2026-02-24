@@ -216,6 +216,12 @@ def cli(ctx):
     default=3600,
     help="Cache TTL in seconds",
 )
+@click.option(
+    "--auth-mode",
+    type=click.Choice(["auto", "manual"]),
+    default=None,
+    help="Override auth mode from config (auto=headless, manual=visible browser).",
+)
 def crawl(
     url: tuple[str, ...],
     output: str,
@@ -240,6 +246,7 @@ def crawl(
     cache: bool,
     cache_dir: Path,
     cache_ttl: int,
+    auth_mode: str | None,
 ) -> None:
     """Crawl websites and extract data.
 
@@ -292,6 +299,7 @@ def crawl(
         checkpoint_path=Path(CHECKPOINT_FILE),
         log_level=log_level,
         log_file=log_file,
+        auth_mode=auth_mode,
     )
 
     # Setup logging from resolved options
@@ -388,6 +396,7 @@ def crawl(
         checkpoint_interval=opts.checkpoint_interval,
         checkpoint_path=opts.checkpoint_path or Path(CHECKPOINT_FILE),
         resume_from=resume_checkpoint,
+        auth=opts.auth,
     )
 
     def handle_shutdown(signum, frame):
@@ -518,6 +527,64 @@ def mcp():
     from ergane.mcp import run
 
     run()
+
+
+@cli.group()
+def auth():
+    """Manage authentication sessions."""
+    pass
+
+
+@auth.command("login")
+@click.option("--config-file", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--auth-mode", type=click.Choice(["auto", "manual"]), default=None)
+def auth_login(config_file, auth_mode):
+    """Run login flow and save session (without crawling)."""
+    import asyncio
+
+    from ergane.auth.manager import AuthManager
+    from ergane.config import CrawlOptions, load_config
+
+    file_config = load_config(config_file)
+    opts = CrawlOptions.from_sources(file_config, auth_mode=auth_mode)
+    if opts.auth is None:
+        raise click.ClickException("No auth section in config file")
+
+    mgr = AuthManager(opts.auth)
+
+    async def _login():
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            await mgr.ensure_authenticated(client)
+        click.echo("Login successful. Session saved.")
+
+    asyncio.run(_login())
+
+
+@auth.command("status")
+@click.option("--session-file", default=".ergane_session.json")
+def auth_status(session_file):
+    """Check if a saved session exists and is valid."""
+    from ergane.auth.session_store import SessionStore
+
+    store = SessionStore(session_file)
+    cookies = store.load()
+    if cookies is None:
+        click.echo("No saved session found.")
+    else:
+        click.echo(f"Session found with {len(cookies)} cookie(s).")
+
+
+@auth.command("clear")
+@click.option("--session-file", default=".ergane_session.json")
+def auth_clear(session_file):
+    """Delete saved session file."""
+    from ergane.auth.session_store import SessionStore
+
+    store = SessionStore(session_file)
+    store.clear()
+    click.echo("Session cleared.")
 
 
 if __name__ == "__main__":
