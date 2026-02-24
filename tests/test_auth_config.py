@@ -78,3 +78,18 @@ class TestAuthConfig:
         )
         assert cfg.mode == "manual"
         assert cfg.username_selector is None
+
+
+from ergane.auth.errors import AuthenticationError
+
+
+class TestAuthenticationError:
+    def test_is_exception(self):
+        err = AuthenticationError("Login failed")
+        assert isinstance(err, Exception)
+        assert str(err) == "Login failed"
+
+    def test_with_cause(self):
+        cause = TimeoutError("connection timed out")
+        err = AuthenticationError("Login failed", cause=cause)
+        assert err.__cause__ is cause
