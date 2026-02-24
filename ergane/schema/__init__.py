@@ -23,7 +23,7 @@ from pydantic import Field
 
 from ergane.schema.base import FieldConfig, SchemaConfig
 from ergane.schema.coercion import CoercionError, TypeCoercer
-from ergane.schema.extractor import ExtractionError, SchemaExtractor
+from ergane.schema.extractor import ExtractionError, FieldResult, SchemaExtractor
 from ergane.schema.parquet_mapper import ParquetSchemaMapper
 from ergane.schema.yaml_loader import SchemaLoadError, load_schema_from_yaml
 
@@ -35,6 +35,7 @@ __all__ = [
     "CoercionError",
     "SchemaExtractor",
     "ExtractionError",
+    "FieldResult",
     "ParquetSchemaMapper",
     "SchemaLoadError",
     "load_schema_from_yaml",

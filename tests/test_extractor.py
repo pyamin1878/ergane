@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import BaseModel
 
-from ergane.schema import ExtractionError, SchemaExtractor, selector
+from ergane.schema import ExtractionError, FieldResult, SchemaExtractor, selector
 
 
 class TestBasicExtraction:
@@ -408,6 +408,117 @@ class TestEdgeCases:
         result = extractor.extract(html, url="https://example.com")
 
         assert result.title == "Empty"
+
+
+class TestExtractDebug:
+    """Tests for SchemaExtractor.extract_debug()."""
+
+    def test_ok_field_returns_ok_status(self):
+        """Field whose selector matches returns status='ok' with the value."""
+
+        class TestModel(BaseModel):
+            title: str = selector("h1")
+
+        html = "<html><body><h1>Hello</h1></body></html>"
+        extractor = SchemaExtractor.from_model(TestModel)
+        results = extractor.extract_debug(html, url="https://example.com")
+
+        assert len(results) == 1
+        fr = results[0]
+        assert isinstance(fr, FieldResult)
+        assert fr.name == "title"
+        assert fr.value == "Hello"
+        assert fr.status == "ok"
+        assert fr.error is None
+
+    def test_missing_required_field_returns_missing_not_raises(self):
+        """Required field with no match returns status='missing', value=None instead of raising."""
+
+        class TestModel(BaseModel):
+            title: str = selector("h1")
+
+        html = "<div>No heading here</div>"
+        extractor = SchemaExtractor.from_model(TestModel)
+        # Must not raise ExtractionError
+        results = extractor.extract_debug(html, url="https://example.com")
+
+        assert len(results) == 1
+        fr = results[0]
+        assert fr.name == "title"
+        assert fr.value is None
+        assert fr.status == "missing"
+        assert fr.error is not None
+        assert "title" in fr.error
+
+    def test_auto_populated_url_field(self):
+        """url field is returned with status='auto' and the given URL as value."""
+
+        class TestModel(BaseModel):
+            url: str
+            title: str = selector("h1")
+
+        html = "<html><body><h1>Test</h1></body></html>"
+        extractor = SchemaExtractor.from_model(TestModel)
+        results = extractor.extract_debug(html, url="https://example.com/page")
+
+        by_name = {r.name: r for r in results}
+        assert by_name["url"].status == "auto"
+        assert by_name["url"].value == "https://example.com/page"
+
+    def test_auto_populated_crawled_at_field(self):
+        """crawled_at field is returned with status='auto' and a datetime value."""
+        from datetime import datetime
+
+        class TestModel(BaseModel):
+            crawled_at: datetime
+            title: str = selector("h1")
+
+        html = "<html><body><h1>Test</h1></body></html>"
+        extractor = SchemaExtractor.from_model(TestModel)
+        results = extractor.extract_debug(html, url="https://example.com")
+
+        by_name = {r.name: r for r in results}
+        assert by_name["crawled_at"].status == "auto"
+        assert isinstance(by_name["crawled_at"].value, datetime)
+
+    def test_coercion_failure_on_optional_field_returns_ok_with_default(self):
+        """Optional field with coercion failure returns status='ok' with default value."""
+
+        class TestModel(BaseModel):
+            price: float = selector("span.price", coerce=True, default=0.0)
+
+        # Text that cannot be coerced to float even with aggressive coercion
+        html = "<span class='price'>N/A</span>"
+        extractor = SchemaExtractor.from_model(TestModel)
+        results = extractor.extract_debug(html, url="https://example.com")
+
+        assert len(results) == 1
+        fr = results[0]
+        # The extractor uses the default on coercion failure for optional/defaulted fields
+        assert fr.status == "ok"
+        assert fr.value == 0.0
+
+    def test_multiple_fields_mixed_results(self):
+        """Multiple fields with a mix of ok and missing statuses."""
+
+        class TestModel(BaseModel):
+            title: str = selector("h1")
+            subtitle: str | None = selector("h2", default=None)
+            missing_field: str = selector("div.nope")
+
+        html = "<html><body><h1>Hello</h1></body></html>"
+        extractor = SchemaExtractor.from_model(TestModel)
+        results = extractor.extract_debug(html, url="https://example.com")
+
+        by_name = {r.name: r for r in results}
+        assert by_name["title"].status == "ok"
+        assert by_name["title"].value == "Hello"
+        # subtitle has default=None so it returns ok with None
+        assert by_name["subtitle"].status == "ok"
+        assert by_name["subtitle"].value is None
+        # missing_field is required with no match → missing
+        assert by_name["missing_field"].status == "missing"
+        assert by_name["missing_field"].value is None
 
 
 class TestFromModel:

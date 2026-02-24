@@ -1,5 +1,6 @@
 """Schema-based HTML extraction using selectolax."""
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,16 @@ class ExtractionError(Exception):
     """Raised when required field extraction fails."""
 
     pass
+
+
+@dataclass
+class FieldResult:
+    """Result of extracting a single field in debug mode."""
+
+    name: str
+    value: Any  # extracted value, or None on failure
+    status: str  # "ok", "missing", "error", "auto"
+    error: str | None = None  # error message if status == "error" or "missing"
 
 
 class SchemaExtractor:
@@ -80,6 +91,53 @@ class SchemaExtractor:
                 data[field_name] = value
 
         return self.schema_config.model(**data)
+
+    def extract_debug(
+        self,
+        html: str,
+        url: str,
+        crawled_at: datetime | None = None,
+    ) -> list[FieldResult]:
+        """Extract all fields and return per-field results without raising.
+
+        Unlike extract(), this never raises ExtractionError — missing required
+        fields produce a FieldResult with status="missing" instead.
+        """
+        if crawled_at is None:
+            crawled_at = datetime.now(timezone.utc)
+
+        tree = HTMLParser(html)
+        results: list[FieldResult] = []
+
+        for field_name, field_config in self.schema_config.fields.items():
+            if field_config.is_auto_populated:
+                val = url if field_name == "url" else crawled_at
+                results.append(FieldResult(name=field_name, value=val, status="auto"))
+                continue
+
+            if not field_config.selector:
+                results.append(
+                    FieldResult(name=field_name, value=None, status="missing")
+                )
+                continue
+
+            try:
+                value = self._extract_field(tree, field_config, url)
+                results.append(FieldResult(name=field_name, value=value, status="ok"))
+            except ExtractionError as exc:
+                results.append(
+                    FieldResult(
+                        name=field_name, value=None, status="missing", error=str(exc)
+                    )
+                )
+            except Exception as exc:
+                results.append(
+                    FieldResult(
+                        name=field_name, value=None, status="error", error=str(exc)
+                    )
+                )
+
+        return results
 
     def _extract_field(
         self, tree: HTMLParser, field_config: FieldConfig, url: str = ""

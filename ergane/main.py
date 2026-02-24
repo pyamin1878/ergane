@@ -422,6 +422,96 @@ def crawl(
     asyncio.run(_run_with_progress())
 
 
+@cli.command("test-schema")
+@click.option("--url", "-u", required=True, help="URL to fetch and test against.")
+@click.option(
+    "--schema",
+    "-s",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="YAML schema file to test.",
+)
+def test_schema(url: str, schema: Path) -> None:
+    """Test a YAML schema against a single page and show extracted values.
+
+    Fetches the URL, runs your schema's CSS selectors, and prints a table
+    showing what each field extracted — or MISSING in red for selectors
+    that matched nothing.
+
+    \b
+    Example:
+      ergane test-schema --url https://quotes.toscrape.com -s schema.yaml
+    """
+    import httpx
+    from rich.console import Console
+    from rich.table import Table
+
+    from ergane.schema import SchemaExtractor
+    from ergane.schema import load_schema_from_yaml
+
+    console = Console()
+
+    async def _run() -> None:
+        try:
+            model = load_schema_from_yaml(schema)
+        except Exception as exc:
+            raise click.ClickException(f"Failed to load schema: {exc}") from exc
+
+        extractor = SchemaExtractor.from_model(model)
+
+        console.print(f"Fetching [bold]{url}[/bold]…")
+        try:
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=30.0
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
+        except httpx.HTTPError as exc:
+            raise click.ClickException(f"HTTP error: {exc}") from exc
+
+        field_results = extractor.extract_debug(html, url=url)
+
+        table = Table(
+            title=f"Schema: [cyan]{schema.name}[/cyan]  ·  URL: {url}",
+            show_lines=True,
+        )
+        table.add_column("Field", style="bold", no_wrap=True)
+        table.add_column("Value", overflow="fold")
+        table.add_column("Status", no_wrap=True)
+
+        ok_count = 0
+        miss_count = 0
+
+        for fr in field_results:
+            if fr.status == "auto":
+                val_str = str(fr.value)
+                status_str = "[dim]auto[/dim]"
+            elif fr.status == "ok":
+                ok_count += 1
+                val_str = repr(fr.value)[:120]
+                status_str = "[green]✓[/green]"
+            else:
+                miss_count += 1
+                val_str = (
+                    f"[red]MISSING[/red] — selector: "
+                    f"[yellow]{extractor.schema_config.fields[fr.name].selector}[/yellow]"
+                )
+                if fr.error:
+                    val_str += f"\n[dim]{fr.error}[/dim]"
+                status_str = "[red]✗[/red]"
+
+            table.add_row(fr.name, val_str, status_str)
+
+        console.print(table)
+        console.print(
+            f"\n[green]{ok_count} field(s) extracted[/green]"
+            + (f"  [red]{miss_count} missing[/red]" if miss_count else "")
+        )
+
+    asyncio.run(_run())
+
+
 @cli.command()
 def mcp():
     """Start the Ergane MCP server (stdio transport)."""
