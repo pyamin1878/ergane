@@ -3,11 +3,16 @@
 import json
 import subprocess
 import sys
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
+from ergane.mcp.prompts import (
+    build_schema_prompt,
+    choose_preset_prompt,
+    plan_crawl_prompt,
+)
 from ergane.mcp.resources import get_preset_resource
 from ergane.mcp.tools import (
     crawl_tool,
@@ -422,3 +427,249 @@ class TestCLI:
             ["crawl", "-u", "http://example.com", "--js-wait", "invalid"],
         )
         assert result.exit_code != 0
+
+
+# --- Step 1: Server Metadata + Tool Annotations ---
+
+
+class TestServerMetadata:
+    """Tests for MCP server instructions and website_url."""
+
+    def test_server_has_instructions(self):
+        from ergane.mcp import server
+        assert server.instructions is not None
+        assert "scraping" in server.instructions.lower()
+
+    def test_server_has_website_url(self):
+        from ergane.mcp import server
+        assert server.website_url == "https://github.com/pyamin1878/ergane"
+
+
+class TestToolAnnotations:
+    """Tests for tool annotations and titles."""
+
+    async def test_tools_have_titles(self):
+        from ergane.mcp import server
+        tools = await server.list_tools()
+        tool_map = {t.name: t for t in tools}
+        assert tool_map["list_presets_tool"].title == "List Presets"
+        assert tool_map["extract_tool"].title == "Extract Page Data"
+        assert tool_map["scrape_preset_tool"].title == "Scrape with Preset"
+        assert tool_map["crawl_tool"].title == "Crawl Website"
+
+    async def test_all_tools_readonly(self):
+        from ergane.mcp import server
+        tools = await server.list_tools()
+        for tool in tools:
+            assert tool.annotations is not None
+            assert tool.annotations.readOnlyHint is True
+
+    async def test_list_presets_idempotent(self):
+        from ergane.mcp import server
+        tools = await server.list_tools()
+        tool_map = {t.name: t for t in tools}
+        lpt = tool_map["list_presets_tool"]
+        assert lpt.annotations.idempotentHint is True
+        assert lpt.annotations.openWorldHint is False
+
+
+# --- Step 2: Exposed Params + Validation ---
+
+
+class TestExposedParams:
+    """Tests for newly exposed tool parameters."""
+
+    async def test_extract_with_timeout(self, mock_server):
+        result = await extract_tool(
+            url=f"{mock_server}/", selectors={"title": "h1"}, timeout=30.0,
+        )
+        data = json.loads(result)
+        assert data["title"] == "Home"
+
+    async def test_extract_with_headers(self, mock_server):
+        result = await extract_tool(
+            url=f"{mock_server}/",
+            selectors={"title": "h1"},
+            headers={"X-Custom": "test"},
+        )
+        data = json.loads(result)
+        assert "title" in data
+
+    async def test_extract_invalid_timeout(self):
+        result = await extract_tool(
+            url="http://example.com/",
+            selectors={"title": "h1"},
+            timeout=0,
+        )
+        data = json.loads(result)
+        assert data["error_code"] == "INVALID_PARAMS"
+
+    async def test_crawl_with_rate_limit(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"], max_pages=1, rate_limit=10.0,
+        )
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
+
+    async def test_crawl_with_ignore_robots(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"], max_pages=1, ignore_robots=True,
+        )
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
+
+    async def test_crawl_with_same_domain_false(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"], max_pages=1, same_domain=False,
+        )
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
+
+    async def test_crawl_with_headers(self, mock_server):
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=1,
+            headers={"Authorization": "Bearer test"},
+        )
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
+
+    async def test_crawl_invalid_rate_limit(self):
+        result = await crawl_tool(
+            urls=["http://example.com/"], max_pages=1, rate_limit=-1.0,
+        )
+        data = json.loads(result)
+        assert data["error_code"] == "INVALID_PARAMS"
+
+    async def test_crawl_invalid_concurrency(self):
+        result = await crawl_tool(
+            urls=["http://example.com/"], max_pages=1, concurrency=0,
+        )
+        data = json.loads(result)
+        assert data["error_code"] == "INVALID_PARAMS"
+
+    async def test_crawl_invalid_max_pages(self):
+        result = await crawl_tool(urls=["http://example.com/"], max_pages=0)
+        data = json.loads(result)
+        assert data["error_code"] == "INVALID_PARAMS"
+
+    async def test_scrape_preset_invalid_max_pages(self):
+        result = await scrape_preset_tool(preset="quotes", max_pages=0)
+        data = json.loads(result)
+        assert data["error_code"] == "INVALID_PARAMS"
+
+
+# --- Step 3: Progress Reporting + Logging ---
+
+
+def _make_mock_context():
+    """Create a mock MCP Context for testing."""
+    ctx = MagicMock()
+    ctx.info = AsyncMock()
+    ctx.warning = AsyncMock()
+    ctx.error = AsyncMock()
+    ctx.debug = AsyncMock()
+    ctx.report_progress = AsyncMock()
+    return ctx
+
+
+class TestProgressReporting:
+    """Tests for progress reporting and context logging."""
+
+    async def test_crawl_reports_progress(self, mock_server):
+        ctx = _make_mock_context()
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"], max_pages=2, max_depth=1, ctx=ctx,
+        )
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
+        assert ctx.report_progress.call_count >= 1
+
+    async def test_crawl_logs_completion(self, mock_server):
+        ctx = _make_mock_context()
+        await crawl_tool(
+            urls=[f"{mock_server}/"], max_pages=1, ctx=ctx,
+        )
+        assert ctx.info.call_count >= 1
+
+    async def test_extract_logs_info(self, mock_server):
+        ctx = _make_mock_context()
+        await extract_tool(
+            url=f"{mock_server}/", selectors={"title": "h1"}, ctx=ctx,
+        )
+        # Should have called info at least twice (fetch + extraction)
+        assert ctx.info.call_count >= 2
+
+    async def test_extract_logs_warning_on_fetch_error(self):
+        ctx = _make_mock_context()
+        await extract_tool(
+            url="http://localhost:1/nonexistent",
+            selectors={"title": "h1"},
+            ctx=ctx,
+        )
+        assert ctx.warning.call_count >= 1
+
+    async def test_tools_work_without_context(self, mock_server):
+        """Verify tools still work when ctx is None (direct calls)."""
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"], max_pages=1,
+        )
+        data = json.loads(result)
+        assert isinstance(data, (list, dict))
+
+
+# --- Step 4: MCP Prompts ---
+
+
+class TestPrompts:
+    """Tests for MCP prompt templates."""
+
+    def test_build_schema_returns_messages(self):
+        result = build_schema_prompt(url="https://example.com")
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0].role == "user"
+        assert result[1].role == "assistant"
+        assert "example.com" in result[0].content.text
+
+    def test_choose_preset_returns_messages(self):
+        result = choose_preset_prompt(task="scrape news headlines")
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0].role == "user"
+        assert result[1].role == "assistant"
+        assert "hacker-news" in result[1].content.text
+
+    def test_plan_crawl_returns_messages(self):
+        result = plan_crawl_prompt(
+            url="https://example.com", goal="collect product prices",
+        )
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0].role == "user"
+        assert result[1].role == "assistant"
+        assert "max_pages" in result[1].content.text
+
+    async def test_prompts_registered_on_server(self):
+        from ergane.mcp import server
+        prompts = await server.list_prompts()
+        prompt_names = {p.name for p in prompts}
+        assert "build-schema" in prompt_names
+        assert "choose-preset" in prompt_names
+        assert "plan-crawl" in prompt_names
+
+    async def test_build_schema_has_url_argument(self):
+        from ergane.mcp import server
+        prompts = await server.list_prompts()
+        build = next(p for p in prompts if p.name == "build-schema")
+        assert build.arguments is not None
+        arg_names = [a.name for a in build.arguments]
+        assert "url" in arg_names
+
+    async def test_choose_preset_has_task_argument(self):
+        from ergane.mcp import server
+        prompts = await server.list_prompts()
+        choose = next(p for p in prompts if p.name == "choose-preset")
+        assert choose.arguments is not None
+        arg_names = [a.name for a in choose.arguments]
+        assert "task" in arg_names

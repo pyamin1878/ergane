@@ -11,12 +11,22 @@ except ImportError as err:
         "Install it with: pip install ergane[mcp]"
     ) from err
 
+from ergane.mcp.prompts import register_prompts
 from ergane.mcp.resources import register_resources
 from ergane.mcp.tools import register_tools
 
-server = FastMCP("ergane")
+server = FastMCP(
+    "ergane",
+    instructions=(
+        "Ergane is a web scraping toolkit. Use its tools to extract structured "
+        "data from web pages, crawl websites, and leverage built-in presets for "
+        "popular sites. All tools are read-only and do not modify any external state."
+    ),
+    website_url="https://github.com/pyamin1878/ergane",
+)
 register_tools(server)
 register_resources(server)
+register_prompts(server)
 
 
 def run() -> None:

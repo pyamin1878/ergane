@@ -7,9 +7,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import yaml
+from mcp.server.fastmcp import Context
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, create_model
 
 from ergane.crawler.engine import Crawler
+from ergane.crawler.hooks import AuthHeaderHook
 from ergane.crawler.parser import extract_data, extract_typed_data
 from ergane.models import CrawlConfig, CrawlRequest
 from ergane.presets import PRESETS, get_preset, get_preset_schema_path
@@ -81,6 +84,35 @@ def _get_preset_fields(preset_id: str) -> list[str]:
     return _PRESET_FIELDS.get(preset_id, [])
 
 
+async def _ctx_info(ctx: Context | None, msg: str) -> None:
+    """Log info via MCP context if available."""
+    if ctx is not None:
+        try:
+            await ctx.info(msg)
+        except Exception:
+            pass
+
+
+async def _ctx_warning(ctx: Context | None, msg: str) -> None:
+    """Log warning via MCP context if available."""
+    if ctx is not None:
+        try:
+            await ctx.warning(msg)
+        except Exception:
+            pass
+
+
+async def _ctx_progress(
+    ctx: Context | None, current: float, total: float, msg: str,
+) -> None:
+    """Report progress via MCP context if available."""
+    if ctx is not None:
+        try:
+            await ctx.report_progress(current, total, msg)
+        except Exception:
+            pass
+
+
 async def list_presets_tool() -> str:
     """List all available scraping presets with their details.
 
@@ -120,6 +152,10 @@ async def extract_tool(
     schema_yaml: str | None = None,
     js: bool = False,
     js_wait: str = "networkidle",
+    timeout: float = 60.0,
+    proxy: str | None = None,
+    headers: dict[str, str] | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """Extract structured data from a single web page.
 
@@ -131,10 +167,18 @@ async def extract_tool(
         selectors: Map of field names to CSS selectors
             (e.g., {"title": "h1", "price": ".price"})
         schema_yaml: Full YAML schema definition (alternative to selectors)
+        js: Enable JavaScript rendering via Playwright
+        js_wait: Playwright page wait strategy
+        timeout: Request timeout in seconds (default: 60)
+        proxy: HTTP/HTTPS proxy URL
+        headers: Custom HTTP headers to send with the request
 
     Returns:
         JSON string with extracted data.
     """
+    if timeout <= 0:
+        return _error("timeout must be > 0", "INVALID_PARAMS")
+
     try:
         schema = None
         if schema_yaml:
@@ -148,20 +192,30 @@ async def extract_tool(
         config = CrawlConfig(
             max_requests_per_second=10.0,
             max_concurrent_requests=1,
-            request_timeout=60.0,
+            request_timeout=timeout,
+            proxy=proxy,
             js=js,
             js_wait=js_wait,
         )
-        request = CrawlRequest(url=url, depth=0, priority=0)
+        request = CrawlRequest(
+            url=url,
+            depth=0,
+            priority=0,
+            metadata={"headers": headers} if headers else {},
+        )
+
+        await _ctx_info(ctx, f"Fetching {url}")
 
         fetcher_cls = _get_fetcher_cls(js)
         async with fetcher_cls(config) as fetcher:
             response = await fetcher.fetch(request)
 
         if response.error:
+            await _ctx_warning(ctx, f"Fetch failed for {url}: {response.error}")
             return _error(f"Fetch failed: {response.error}", "FETCH_ERROR")
 
         if not response.content:
+            await _ctx_warning(ctx, f"Empty response from {url}")
             return _error("Empty response", "FETCH_ERROR")
 
         if schema is not None:
@@ -169,6 +223,7 @@ async def extract_tool(
         else:
             item = extract_data(response)
 
+        await _ctx_info(ctx, f"Extracted data from {url}")
         return json.dumps(item.model_dump(mode="json"), indent=2, default=str)
 
     except Exception as e:
@@ -180,6 +235,8 @@ async def scrape_preset_tool(
     max_pages: int = 5,
     js: bool = False,
     js_wait: str = "networkidle",
+    timeout: float = 60.0,
+    ctx: Context | None = None,
 ) -> str:
     """Scrape a website using a built-in preset — zero configuration needed.
 
@@ -191,10 +248,18 @@ async def scrape_preset_tool(
     Args:
         preset: Preset name (e.g., "hacker-news", "quotes")
         max_pages: Maximum number of pages to scrape (default: 5)
+        js: Enable JavaScript rendering via Playwright
+        js_wait: Playwright page wait strategy
+        timeout: Request timeout in seconds (default: 60)
 
     Returns:
         JSON array of extracted items, or error message.
     """
+    if max_pages < 1:
+        return _error("max_pages must be >= 1", "INVALID_PARAMS")
+    if timeout <= 0:
+        return _error("timeout must be > 0", "INVALID_PARAMS")
+
     try:
         preset_config = get_preset(preset)
     except KeyError as e:
@@ -211,11 +276,27 @@ async def scrape_preset_tool(
             max_depth=preset_config.defaults.get("max_depth", 1),
             concurrency=5,
             rate_limit=5.0,
-            timeout=60.0,
+            timeout=timeout,
             js=js,
             js_wait=js_wait,
         ) as crawler:
-            results = await crawler.run()
+            results = []
+            async for item in crawler.stream():
+                stats = crawler.stats
+                await _ctx_progress(
+                    ctx, stats["pages_crawled"], max_pages,
+                    f"Scraping {preset}... ({stats['pages_crawled']}/{max_pages})",
+                )
+                results.append(item)
+
+            stats = crawler.stats
+            if stats["errors"] > 0:
+                await _ctx_warning(ctx, f"Finished with {stats['errors']} error(s)")
+            await _ctx_info(
+                ctx,
+                f"Scrape complete: {stats['pages_crawled']} pages, "
+                f"{stats['items_extracted']} items",
+            )
 
         items = [r.model_dump(mode="json") for r in results]
         return _truncate_json(items, MAX_RESULT_ITEMS)
@@ -233,6 +314,13 @@ async def crawl_tool(
     output_format: str = "json",
     js: bool = False,
     js_wait: str = "networkidle",
+    rate_limit: float = 5.0,
+    timeout: float = 60.0,
+    same_domain: bool = True,
+    ignore_robots: bool = False,
+    proxy: str | None = None,
+    headers: dict[str, str] | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """Crawl one or more websites and extract structured data.
 
@@ -247,10 +335,27 @@ async def crawl_tool(
         max_depth: How deep to follow links (default: 1, 0 = seed URLs only)
         concurrency: Number of concurrent requests (default: 5)
         output_format: Output format — "json", "csv", or "jsonl" (default: "json")
+        js: Enable JavaScript rendering via Playwright
+        js_wait: Playwright page wait strategy
+        rate_limit: Maximum requests per second per domain (default: 5)
+        timeout: Request timeout in seconds (default: 60)
+        same_domain: Only follow links on the same domain (default: true)
+        ignore_robots: Ignore robots.txt restrictions (default: false)
+        proxy: HTTP/HTTPS proxy URL
+        headers: Custom HTTP headers to send with requests
 
     Returns:
         Extracted data as JSON array, CSV text, or JSONL text.
     """
+    if max_pages < 1:
+        return _error("max_pages must be >= 1", "INVALID_PARAMS")
+    if concurrency < 1:
+        return _error("concurrency must be >= 1", "INVALID_PARAMS")
+    if rate_limit <= 0:
+        return _error("rate_limit must be > 0", "INVALID_PARAMS")
+    if timeout <= 0:
+        return _error("timeout must be > 0", "INVALID_PARAMS")
+
     try:
         schema = None
         if schema_yaml:
@@ -259,18 +364,42 @@ async def crawl_tool(
             except Exception as e:
                 return _error(f"Invalid schema YAML: {e}", "SCHEMA_ERROR")
 
+        hooks = []
+        if headers:
+            hooks.append(AuthHeaderHook(headers))
+
         async with Crawler(
             urls=urls,
             schema=schema,
             max_pages=max_pages,
             max_depth=max_depth,
             concurrency=concurrency,
-            rate_limit=5.0,
-            timeout=60.0,
+            rate_limit=rate_limit,
+            timeout=timeout,
+            same_domain=same_domain,
+            respect_robots_txt=not ignore_robots,
+            proxy=proxy,
+            hooks=hooks or None,
             js=js,
             js_wait=js_wait,
         ) as crawler:
-            results = await crawler.run()
+            results = []
+            async for item in crawler.stream():
+                stats = crawler.stats
+                await _ctx_progress(
+                    ctx, stats["pages_crawled"], max_pages,
+                    f"Crawling... ({stats['pages_crawled']}/{max_pages} pages)",
+                )
+                results.append(item)
+
+            stats = crawler.stats
+            if stats["errors"] > 0:
+                await _ctx_warning(ctx, f"Finished with {stats['errors']} error(s)")
+            await _ctx_info(
+                ctx,
+                f"Crawl complete: {stats['pages_crawled']} pages, "
+                f"{stats['items_extracted']} items",
+            )
 
         items = [r.model_dump(mode="json") for r in results]
         display_items = items[:MAX_RESULT_ITEMS]
@@ -299,7 +428,32 @@ async def crawl_tool(
 
 def register_tools(mcp: FastMCP) -> None:
     """Register all Ergane tools with the MCP server."""
-    mcp.tool()(list_presets_tool)
-    mcp.tool()(extract_tool)
-    mcp.tool()(scrape_preset_tool)
-    mcp.tool()(crawl_tool)
+    mcp.tool(
+        title="List Presets",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )(list_presets_tool)
+    mcp.tool(
+        title="Extract Page Data",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            openWorldHint=True,
+        ),
+    )(extract_tool)
+    mcp.tool(
+        title="Scrape with Preset",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            openWorldHint=True,
+        ),
+    )(scrape_preset_tool)
+    mcp.tool(
+        title="Crawl Website",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            openWorldHint=True,
+        ),
+    )(crawl_tool)
