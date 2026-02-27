@@ -98,6 +98,7 @@ All options for the `crawl` command:
 | `--preset` | `-p` | TEXT | none | Use a built-in preset |
 | `--list-presets` | | FLAG | | Show available presets and exit |
 | `--proxy` | `-x` | TEXT | none | HTTP/HTTPS proxy URL (e.g., `http://localhost:8080`) |
+| `--domain-rate-limit` | | TEXT (multiple) | none | Per-domain rate limit as `DOMAIN:RATE`. Overrides `--rate-limit` for that domain. Repeat for multiple domains. |
 | `--resume` | | FLAG | | Resume from last checkpoint |
 | `--checkpoint-interval` | | INT | `100` | Save checkpoint every N pages |
 | `--log-level` | | CHOICE | `INFO` | DEBUG, INFO, WARNING, ERROR |
@@ -375,6 +376,7 @@ crawler:
   respect_robots_txt: true
   proxy: null
   user_agent: null
+  domain_rate_limits: {}
   cache: false
   cache_dir: .ergane_cache
   cache_ttl: 3600
@@ -435,6 +437,17 @@ Control the maximum requests per second per domain (default: 10.0):
 
 ```bash
 ergane -u https://example.com --rate-limit 2.0 -o data.csv
+```
+
+Override the rate for specific domains with `--domain-rate-limit DOMAIN:RATE`. The flag is repeatable:
+
+```bash
+# 0.5 req/s for the slow site, 20 req/s for the fast CDN, global default elsewhere
+ergane -u https://slow-site.com \
+       --rate-limit 5.0 \
+       --domain-rate-limit slow-site.com:0.5 \
+       --domain-rate-limit fast-cdn.example.com:20 \
+       -o data.csv
 ```
 
 ### Concurrency

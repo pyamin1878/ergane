@@ -79,6 +79,7 @@ All parameters are keyword-only except `urls`.
 | `respect_robots_txt` | `bool` | `True` | Obey robots.txt |
 | `user_agent` | `str \| None` | `None` | Custom user agent (default: `Ergane/{version}`) |
 | `proxy` | `str \| None` | `None` | HTTP/HTTPS proxy URL |
+| `domain_rate_limits` | `dict[str, float] \| None` | `None` | Per-domain rate overrides (req/sec). Hostname keys override `rate_limit` for that domain. |
 | `hooks` | `list[CrawlHook] \| None` | `None` | List of hook instances |
 | `output` | `str \| Path \| None` | `None` | File path to write results |
 | `output_format` | `OutputFormat` | `"auto"` | `csv`, `excel`, `parquet`, `json`, `jsonl`, `sqlite` |
@@ -590,11 +591,38 @@ await pipeline.finalize()
 | `batch_size` | `int` | `100` | Pipeline batch size |
 | `output_schema` | `type[BaseModel] \| None` | `None` | Schema model |
 | `proxy` | `str \| None` | `None` | Proxy URL |
+| `domain_rate_limits` | `dict[str, float]` | `{}` | Per-domain rate overrides (req/sec). Keys are hostnames; values override `max_requests_per_second` for that domain. |
 | `cache_enabled` | `bool` | `False` | Enable response caching |
 | `cache_dir` | `Path` | `Path(".ergane_cache")` | Cache directory |
 | `cache_ttl` | `int` | `3600` | Cache TTL in seconds |
 | `js` | `bool` | `False` | Enable Playwright JS rendering |
 | `js_wait` | `Literal["networkidle", "domcontentloaded", "load"]` | `"networkidle"` | Playwright wait strategy |
+
+### Per-Domain Rate Limits
+
+Use `domain_rate_limits` to set different rate limits for specific domains. This is useful when crawling multiple sites with different tolerance levels, or when you need to be more conservative with a slow site while staying fast elsewhere:
+
+```python
+async with Crawler(
+    urls=["https://slow-site.com", "https://fast-cdn.example.com"],
+    rate_limit=10.0,                         # default for all domains
+    domain_rate_limits={
+        "slow-site.com": 0.5,               # 1 req every 2 seconds
+        "fast-cdn.example.com": 50.0,       # 50 req/s
+    },
+    max_pages=200,
+) as crawler:
+    items = await crawler.run()
+```
+
+Or via `CrawlConfig` directly:
+
+```python
+config = CrawlConfig(
+    max_requests_per_second=5.0,
+    domain_rate_limits={"api.example.com": 1.0},
+)
+```
 
 ### Loading Configuration
 
