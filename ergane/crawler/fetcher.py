@@ -77,9 +77,10 @@ class Fetcher:
 
     def _get_bucket(self, domain: str) -> TokenBucket:
         if domain not in self._domain_buckets:
-            self._domain_buckets[domain] = TokenBucket(
-                self.config.max_requests_per_second
+            rate = self.config.domain_rate_limits.get(
+                domain, self.config.max_requests_per_second
             )
+            self._domain_buckets[domain] = TokenBucket(rate)
         return self._domain_buckets[domain]
 
     _ROBOTS_CACHE_MAX = 1000

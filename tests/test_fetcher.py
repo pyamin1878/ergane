@@ -210,3 +210,24 @@ class TestRetryLogic:
 
             # Should have waited: 0.1 (first retry) + 0.2 (second retry) = 0.3s min
             assert elapsed >= 0.25
+
+
+class TestPerDomainRateLimits:
+    """Domain-specific rate limits override the global rate."""
+
+    def test_domain_bucket_uses_domain_rate(self):
+        """_get_bucket uses domain_rate_limits when present."""
+        config = CrawlConfig(
+            max_requests_per_second=1.0,
+            domain_rate_limits={"fast.example.com": 100.0},
+        )
+        fetcher = Fetcher(config)
+        fast_bucket = fetcher._get_bucket("fast.example.com")
+        slow_bucket = fetcher._get_bucket("slow.example.com")
+        assert fast_bucket.rate == 100.0
+        assert slow_bucket.rate == 1.0
+
+    def test_domain_rate_limits_defaults_empty(self):
+        """CrawlConfig has empty domain_rate_limits by default."""
+        config = CrawlConfig()
+        assert config.domain_rate_limits == {}

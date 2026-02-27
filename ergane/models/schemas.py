@@ -26,6 +26,10 @@ class CrawlConfig(BaseModel):
     batch_size: int = Field(default=100, gt=0)
     output_schema: type[BaseModel] | None = Field(default=None)
     proxy: str | None = Field(default=None, description="HTTP/HTTPS proxy URL")
+    domain_rate_limits: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-domain rate limits (req/sec). Overrides max_requests_per_second.",
+    )
 
     # Caching
     cache_enabled: bool = Field(default=False)

@@ -167,6 +167,13 @@ def cli(ctx):
     help="HTTP/HTTPS proxy URL (e.g., http://localhost:8080)",
 )
 @click.option(
+    "--domain-rate-limit",
+    "domain_rate_limits",
+    multiple=True,
+    metavar="DOMAIN:RATE",
+    help="Per-domain rate limit as 'domain:rate'. Repeatable.",
+)
+@click.option(
     "--resume",
     is_flag=True,
     help="Resume from last checkpoint",
@@ -250,6 +257,7 @@ def crawl(
     preset: str | None,
     list_presets: bool,
     proxy: str | None,
+    domain_rate_limits: tuple[str, ...],
     resume: bool,
     checkpoint_interval: int | None,
     log_level: str | None,
@@ -391,6 +399,17 @@ def crawl(
         else:
             logger.info(f"Found checkpoint from {resume_checkpoint.timestamp}")
 
+    # Parse --domain-rate-limit entries
+    parsed_domain_rates: dict[str, float] = {}
+    for entry in domain_rate_limits:
+        if ":" not in entry:
+            raise click.BadParameter(f"Expected DOMAIN:RATE, got: {entry!r}")
+        domain, _, rate_str = entry.partition(":")
+        try:
+            parsed_domain_rates[domain.strip()] = float(rate_str.strip())
+        except ValueError:
+            raise click.BadParameter(f"Rate must be a number, got: {rate_str!r}")
+
     # Build the Crawler
     crawler = Crawler(
         urls=start_urls,
@@ -403,6 +422,7 @@ def crawl(
         same_domain=opts.same_domain,
         respect_robots_txt=opts.respect_robots_txt,
         proxy=opts.proxy,
+        domain_rate_limits=parsed_domain_rates or None,
         output=opts.output,
         output_format=opts.output_format,  # type: ignore[arg-type]
         cache=opts.cache,
