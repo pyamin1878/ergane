@@ -673,3 +673,29 @@ class TestPrompts:
         assert choose.arguments is not None
         arg_names = [a.name for a in choose.arguments]
         assert "task" in arg_names
+
+
+class TestCrawlProgress:
+    """MCP crawl tool emits progress during execution."""
+
+    async def test_crawl_reports_progress(self, mock_server):
+        """crawl_tool calls ctx.report_progress at least once during a crawl."""
+        import json
+        from unittest.mock import AsyncMock, MagicMock
+
+        ctx = MagicMock()
+        ctx.report_progress = AsyncMock()
+        ctx.info = AsyncMock()
+        ctx.warning = AsyncMock()
+
+        result = await crawl_tool(
+            urls=[f"{mock_server}/"],
+            max_pages=2,
+            ctx=ctx,
+            same_domain=False,
+            ignore_robots=True,
+        )
+
+        data = json.loads(result)
+        assert isinstance(data, list)
+        ctx.report_progress.assert_called()
