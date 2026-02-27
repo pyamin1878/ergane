@@ -372,7 +372,7 @@ class TestCLI:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.7.1" in result.output
+        assert "0.7.3" in result.output
 
     def test_negative_max_pages_rejected(self, mock_server):
         from ergane.main import cli
