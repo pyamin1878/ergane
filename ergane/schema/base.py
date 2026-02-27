@@ -1,5 +1,6 @@
 """Schema configuration classes for parsing Pydantic models."""
 
+import functools
 from dataclasses import dataclass, field
 from typing import Any, get_args, get_origin
 
@@ -38,27 +39,7 @@ class SchemaConfig:
 
     @classmethod
     def from_model(cls, model: type[BaseModel]) -> "SchemaConfig":
-        """Parse a Pydantic model to extract field configurations.
-
-        Fast path: if the model was built by yaml_loader it carries a
-        ``__ergane_fields__`` class attribute with pre-computed FieldConfig
-        objects — use those directly to skip re-parsing json_schema_extra.
-
-        Slow path: iterate model_fields and parse json_schema_extra metadata
-        (used for programmatic schemas defined with the selector() helper).
-        """
-        cached: dict[str, FieldConfig] | None = getattr(
-            model, "__ergane_fields__", None
-        )
-        if cached is not None:
-            return cls(model=model, fields=dict(cached))
-
-        config = cls(model=model)
-        for field_name, field_info in model.model_fields.items():
-            field_config = cls._parse_field(field_name, field_info)
-            config.fields[field_name] = field_config
-
-        return config
+        return _build_schema_config(model)
 
     @classmethod
     def _parse_field(cls, name: str, field_info: FieldInfo) -> FieldConfig:
@@ -141,6 +122,24 @@ class SchemaConfig:
     def get_auto_fields(self) -> dict[str, FieldConfig]:
         """Return fields that are auto-populated (url, crawled_at)."""
         return {name: cfg for name, cfg in self.fields.items() if cfg.is_auto_populated}
+
+
+@functools.cache
+def _build_schema_config(model: type[BaseModel]) -> "SchemaConfig":
+    """Build and cache a SchemaConfig for a Pydantic model class.
+
+    Cached because model classes are immutable — re-parsing field annotations
+    on every page fetch is pure waste.
+    """
+    cached: dict[str, FieldConfig] | None = getattr(model, "__ergane_fields__", None)
+    if cached is not None:
+        return SchemaConfig(model=model, fields=dict(cached))
+
+    config = SchemaConfig(model=model)
+    for field_name, field_info in model.model_fields.items():
+        field_config = SchemaConfig._parse_field(field_name, field_info)
+        config.fields[field_name] = field_config
+    return config
 
 
 def _is_union_type(origin: Any) -> bool:

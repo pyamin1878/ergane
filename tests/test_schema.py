@@ -222,3 +222,31 @@ class TestFieldConfig:
         """Regular field without selector is not auto-populated."""
         field = FieldConfig(name="title", python_type=str, selector=None)
         assert not field.is_auto_populated
+
+
+class TestSchemaConfigCaching:
+    """SchemaConfig.from_model should be cached across calls."""
+
+    def test_from_model_returns_same_object(self):
+        """Calling from_model twice on the same class returns the identical object."""
+        from ergane.schema.base import SchemaConfig
+
+        class _CacheTestModel(BaseModel):
+            title: str = selector("h1")
+
+        first = SchemaConfig.from_model(_CacheTestModel)
+        second = SchemaConfig.from_model(_CacheTestModel)
+        assert first is second
+
+    def test_different_models_cached_independently(self):
+        """Two different model classes each get their own cached config."""
+        from ergane.schema.base import SchemaConfig
+
+        class _ModelA(BaseModel):
+            title: str = selector("h1")
+
+        class _ModelB(BaseModel):
+            price: str = selector(".price")
+
+        assert SchemaConfig.from_model(_ModelA) is not SchemaConfig.from_model(_ModelB)
+        assert SchemaConfig.from_model(_ModelA) is SchemaConfig.from_model(_ModelA)
