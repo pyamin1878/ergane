@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 import sqlite3
 import tempfile
 from abc import ABC, abstractmethod
@@ -51,6 +52,37 @@ class BatchWriter(ABC):
     def _read(self, path: Path) -> pl.DataFrame:
         """Format-specific read implementation."""
 
+    def consolidate_batches(
+        self, batch_files: list[Path], output_path: Path, stem: str
+    ) -> None:
+        """Merge batch files into output_path.
+
+        Default: load all into a Polars DataFrame (in-memory). Subclasses
+        override with streaming implementations for large crawls.
+        """
+        if not batch_files:
+            return
+        if len(batch_files) == 1 and batch_files[0].suffix == output_path.suffix:
+            batch_files[0].replace(output_path)
+            return
+        dfs = [self._read(f) for f in batch_files]
+        combined = pl.concat(dfs)
+        if "url" in combined.columns:
+            combined = combined.unique(subset=["url"], keep="last")
+        suffix = output_path.suffix or ".tmp"
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent, suffix=suffix, delete=False
+        ) as tmp_f:
+            tmp_path = Path(tmp_f.name)
+        try:
+            self.write_final(combined, tmp_path, stem)
+            tmp_path.replace(output_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        for f in batch_files:
+            f.unlink()
+
 
 class ParquetWriter(BatchWriter):
     batch_extension = ".parquet"
@@ -61,6 +93,31 @@ class ParquetWriter(BatchWriter):
     def _read(self, path: Path) -> pl.DataFrame:
         return pl.read_parquet(path)
 
+    def consolidate_batches(
+        self, batch_files: list[Path], output_path: Path, stem: str
+    ) -> None:
+        """Merge parquet batches using the lazy API to avoid full in-memory load."""
+        if not batch_files:
+            return
+        if len(batch_files) == 1:
+            batch_files[0].replace(output_path)
+            return
+        combined = pl.scan_parquet(batch_files).collect()
+        if "url" in combined.columns:
+            combined = combined.unique(subset=["url"], keep="last")
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent, suffix=".parquet", delete=False
+        ) as tmp_f:
+            tmp_path = Path(tmp_f.name)
+        try:
+            combined.write_parquet(tmp_path)
+            tmp_path.replace(output_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        for f in batch_files:
+            f.unlink()
+
 
 class CsvWriter(BatchWriter):
     batch_extension = ".csv"
@@ -70,6 +127,19 @@ class CsvWriter(BatchWriter):
 
     def _read(self, path: Path) -> pl.DataFrame:
         return pl.read_csv(path)
+
+    def consolidate_batches(
+        self, batch_files: list[Path], output_path: Path, stem: str
+    ) -> None:
+        """Concatenate CSV batches, preserving only the first header row."""
+        with open(output_path, "wb") as out:
+            for i, f in enumerate(batch_files):
+                with open(f, "rb") as inp:
+                    if i > 0:
+                        inp.readline()  # discard header from batch 2+
+                    shutil.copyfileobj(inp, out)
+        for f in batch_files:
+            f.unlink()
 
 
 class ExcelWriter(BatchWriter):
@@ -98,6 +168,17 @@ class JsonlWriter(BatchWriter):
     def _read(self, path: Path) -> pl.DataFrame:
         return pl.read_ndjson(path)
 
+    def consolidate_batches(
+        self, batch_files: list[Path], output_path: Path, stem: str
+    ) -> None:
+        """Concatenate JSONL batch files without loading into RAM."""
+        with open(output_path, "wb") as out:
+            for f in batch_files:
+                with open(f, "rb") as inp:
+                    shutil.copyfileobj(inp, out)
+        for f in batch_files:
+            f.unlink()
+
 
 class JsonWriter(JsonlWriter):
     """Final output is a JSON array; batches are stored as JSONL."""
@@ -105,9 +186,36 @@ class JsonWriter(JsonlWriter):
     def write_final(self, df: pl.DataFrame, path: Path, stem: str) -> None:
         df.write_json(path)
 
+    def consolidate_batches(
+        self, batch_files: list[Path], output_path: Path, stem: str
+    ) -> None:
+        """Stream JSONL batches into a JSON array without loading all into RAM."""
+        with open(output_path, "w", encoding="utf-8") as out:
+            out.write("[\n")
+            first_record = True
+            for f in batch_files:
+                with open(f, encoding="utf-8") as inp:
+                    for line in inp:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if not first_record:
+                            out.write(",\n")
+                        out.write(line)
+                        first_record = False
+            out.write("\n]\n")
+        for f in batch_files:
+            f.unlink()
+
 
 class SqliteWriter(JsonlWriter):
     """Final output is a SQLite database file; batches are stored as JSONL."""
+
+    def consolidate_batches(
+        self, batch_files: list[Path], output_path: Path, stem: str
+    ) -> None:
+        """Load JSONL batches into a DataFrame then write as SQLite (in-memory)."""
+        BatchWriter.consolidate_batches(self, batch_files, output_path, stem)
 
     @staticmethod
     def _polars_to_sqlite_type(dtype: pl.DataType) -> str:
@@ -308,53 +416,12 @@ class Pipeline:
         parent = self.output_path.parent
         batch_ext = self._writer.batch_extension
 
-        # Find all batch files
         batch_files = sorted(parent.glob(f"{stem}_*{batch_ext}"))
 
         if not batch_files:
             return self.output_path
 
-        if len(batch_files) == 1 and self.output_format not in ("json", "sqlite"):
-            # Just rename the single batch file
-            batch_files[0].rename(self.output_path)
-            return self.output_path
-
-        # Read and concatenate all batch files.
-        # Parquet: use the lazy API so Polars scans files without loading all
-        # DataFrames into RAM simultaneously.  Other formats fall back to an
-        # incremental concat.
-        if self.output_format == "parquet":
-            combined = pl.scan_parquet(batch_files).collect()
-        else:
-            combined = pl.DataFrame()
-            for f in batch_files:
-                batch_df = self._writer.read_batch(f)
-                if len(combined) > 0:
-                    combined = pl.concat([combined, batch_df])
-                else:
-                    combined = batch_df
-
-        # Deduplicate by URL, keeping the last occurrence
-        if "url" in combined.columns:
-            combined = combined.unique(subset=["url"], keep="last")
-
-        # Write to a temp file first, then rename atomically
-        suffix = self.output_path.suffix or ".tmp"
-        with tempfile.NamedTemporaryFile(
-            dir=parent, suffix=suffix, delete=False
-        ) as tmp_f:
-            tmp_path = Path(tmp_f.name)
-        try:
-            self._writer.write_final(combined, tmp_path, stem)
-            tmp_path.replace(self.output_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-        # Batch files are removed only after the final file is safely in place.
-        for f in batch_files:
-            f.unlink()
-
+        self._writer.consolidate_batches(batch_files, self.output_path, stem)
         return self.output_path
 
     def get_batch_files(self) -> list[Path]:

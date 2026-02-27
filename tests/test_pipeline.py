@@ -308,3 +308,54 @@ class TestConcurrency:
 
         await pipeline.flush()
         assert pipeline.total_written == 150
+
+
+class TestStreamingConsolidation:
+    """Non-parquet formats consolidate without loading all data into RAM."""
+
+    async def test_jsonl_consolidate_no_dataframe(
+        self, config: CrawlConfig, tmp_path: Path
+    ):
+        """JSONL consolidation produces correct line count without in-memory concat."""
+        cfg = CrawlConfig(batch_size=3)
+        p = Pipeline(cfg, tmp_path / "out2.jsonl")
+        for i in range(9):
+            await p.add(make_item(f"https://example.com/{i}"))
+        await p.flush()
+        p.consolidate()
+
+        lines = (tmp_path / "out2.jsonl").read_text().strip().splitlines()
+        assert len(lines) == 9
+
+    async def test_csv_consolidate_single_header(
+        self, config: CrawlConfig, tmp_path: Path
+    ):
+        """CSV consolidation writes exactly one header row."""
+        cfg = CrawlConfig(batch_size=3)
+        p = Pipeline(cfg, tmp_path / "out.csv")
+        for i in range(9):
+            await p.add(make_item(f"https://example.com/{i}"))
+        await p.flush()
+        p.consolidate()
+
+        text = (tmp_path / "out.csv").read_text()
+        lines = [l for l in text.splitlines() if l.strip()]
+        header_count = sum(1 for l in lines if l.startswith("url,") or l.startswith('"url"'))
+        assert header_count == 1
+        assert len(lines) == 10  # 1 header + 9 data rows
+
+    async def test_json_consolidate_valid_array(
+        self, config: CrawlConfig, tmp_path: Path
+    ):
+        """JSON consolidation writes a valid JSON array."""
+        import json as _json
+        cfg = CrawlConfig(batch_size=3)
+        p = Pipeline(cfg, tmp_path / "out.json")
+        for i in range(9):
+            await p.add(make_item(f"https://example.com/{i}"))
+        await p.flush()
+        p.consolidate()
+
+        data = _json.loads((tmp_path / "out.json").read_text())
+        assert isinstance(data, list)
+        assert len(data) == 9
