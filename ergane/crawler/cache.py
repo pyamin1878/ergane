@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,14 +34,19 @@ class ResponseCache:
         self.cache_dir = cache_dir
         self.ttl = timedelta(seconds=ttl_seconds)
         self.db_path = cache_dir / "response_cache.db"
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
         self._cleanup_expired_sync()
 
     def _init_db(self) -> None:
         """Initialize the SQLite database."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        with self._conn:
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS responses (
                     url_hash TEXT PRIMARY KEY,
                     url TEXT,
@@ -50,7 +56,7 @@ class ResponseCache:
                     cached_at TEXT
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cached_at ON responses(cached_at)
             """)
 
@@ -61,12 +67,10 @@ class ResponseCache:
     def _get_sync(self, url: str) -> CacheEntry | None:
         """Synchronous cache lookup (runs in thread pool)."""
         url_hash = self._hash_url(url)
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                SELECT url, status_code, content, headers, cached_at
-                FROM responses WHERE url_hash = ?
-                """,
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT url, status_code, content, headers, cached_at "
+                "FROM responses WHERE url_hash = ?",
                 (url_hash,),
             )
             row = cursor.fetchone()
@@ -94,34 +98,36 @@ class ResponseCache:
         """Synchronous cache write (runs in thread pool)."""
         url_hash = self._hash_url(url)
         cached_at = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO responses
-                (url_hash, url, status_code, content, headers, cached_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO responses "
+                "(url_hash, url, status_code, content, headers, cached_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (url_hash, url, status_code, content, headers_json, cached_at),
             )
+            self._conn.commit()
 
     def _delete_sync(self, url: str) -> None:
         """Synchronous cache delete (runs in thread pool)."""
         url_hash = self._hash_url(url)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM responses WHERE url_hash = ?", (url_hash,))
+        with self._lock:
+            self._conn.execute("DELETE FROM responses WHERE url_hash = ?", (url_hash,))
+            self._conn.commit()
 
     def _clear_sync(self) -> None:
         """Synchronous cache clear (runs in thread pool)."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM responses")
+        with self._lock:
+            self._conn.execute("DELETE FROM responses")
+            self._conn.commit()
 
     def _cleanup_expired_sync(self) -> int:
         """Synchronous expired entry cleanup (runs in thread pool or at init)."""
         cutoff = (datetime.now(timezone.utc) - self.ttl).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
+        with self._lock:
+            cursor = self._conn.execute(
                 "DELETE FROM responses WHERE cached_at < ?", (cutoff,)
             )
+            self._conn.commit()
             return cursor.rowcount
 
     async def get(self, url: str) -> CacheEntry | None:
@@ -175,8 +181,8 @@ class ResponseCache:
         Returns:
             Dict with 'total_entries' and 'db_size_bytes' keys.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT COUNT(*) FROM responses")
+        with self._lock:
+            cursor = self._conn.execute("SELECT COUNT(*) FROM responses")
             total = cursor.fetchone()[0]
 
         db_size = self.db_path.stat().st_size if self.db_path.exists() else 0

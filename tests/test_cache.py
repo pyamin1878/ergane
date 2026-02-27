@@ -178,3 +178,26 @@ class TestURLHashing:
         h = cache._hash_url("https://example.com")
         assert len(h) == 64  # SHA-256 hex digest length
         assert all(c in "0123456789abcdef" for c in h)
+
+
+import sqlite3 as _sqlite3
+
+
+class TestCacheWAL:
+    """WAL journal mode and persistent connection tests."""
+
+    def test_wal_mode_enabled(self, cache: ResponseCache):
+        """Cache database uses WAL journal mode."""
+        with _sqlite3.connect(cache.db_path) as conn:
+            row = conn.execute("PRAGMA journal_mode").fetchone()
+        assert row[0] == "wal"
+
+    async def test_concurrent_reads_do_not_raise(self, cache: ResponseCache):
+        """Multiple async gets on the same key complete without error."""
+        await cache.set("https://example.com/x", 200, "<html/>", {})
+        results = await asyncio.gather(
+            cache.get("https://example.com/x"),
+            cache.get("https://example.com/x"),
+            cache.get("https://example.com/x"),
+        )
+        assert all(r is not None for r in results)
