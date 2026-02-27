@@ -325,3 +325,30 @@ async def test_crawler_uses_playwright_when_js_true(engine_server: str):
         assert isinstance(c._fetcher, PlaywrightFetcher)
         results = await c.run()
     assert len(results) >= 1
+
+
+class TestStreamLatency:
+    """Items should be yielded promptly, not held up by a polling interval."""
+
+    async def test_stream_yields_within_200ms(self, engine_server: str):
+        """First item from stream() arrives well under 200ms after crawl starts."""
+        import time
+
+        url = f"{engine_server}/"
+        start = time.monotonic()
+        first_item_time = None
+
+        async with Crawler(
+            urls=[url],
+            max_pages=1,
+            same_domain=False,
+            respect_robots_txt=False,
+        ) as crawler:
+            async for _item in crawler.stream():
+                first_item_time = time.monotonic() - start
+                break
+
+        assert first_item_time is not None
+        assert first_item_time < 0.2, (
+            f"First item took {first_item_time:.3f}s — polling loop not event-driven?"
+        )

@@ -464,11 +464,11 @@ class Crawler:
                     await self._save_checkpoint(scheduler)
                     last_checkpoint_count = current_pages
 
-                # Drain any available items from the queue
-                while not item_queue.empty():
-                    yield item_queue.get_nowait()
-
-                await asyncio.sleep(0.1)
+                try:
+                    item = await asyncio.wait_for(item_queue.get(), timeout=0.1)
+                    yield item
+                except asyncio.TimeoutError:
+                    pass
 
             # Drain remaining items
             while not item_queue.empty():
