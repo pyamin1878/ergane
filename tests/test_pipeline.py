@@ -339,8 +339,10 @@ class TestStreamingConsolidation:
         p.consolidate()
 
         text = (tmp_path / "out.csv").read_text()
-        lines = [l for l in text.splitlines() if l.strip()]
-        header_count = sum(1 for l in lines if l.startswith("url,") or l.startswith('"url"'))
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        header_count = sum(
+            1 for ln in lines if ln.startswith("url,") or ln.startswith('"url"')
+        )
         assert header_count == 1
         assert len(lines) == 10  # 1 header + 9 data rows
 

@@ -1,6 +1,7 @@
 """Tests for SQLite-based response caching."""
 
 import asyncio
+import sqlite3 as _sqlite3
 from pathlib import Path
 
 import pytest
@@ -179,8 +180,6 @@ class TestURLHashing:
         assert len(h) == 64  # SHA-256 hex digest length
         assert all(c in "0123456789abcdef" for c in h)
 
-
-import sqlite3 as _sqlite3
 
 
 class TestCacheWAL:

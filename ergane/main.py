@@ -407,8 +407,9 @@ def crawl(
         domain, _, rate_str = entry.partition(":")
         try:
             parsed_domain_rates[domain.strip()] = float(rate_str.strip())
-        except ValueError:
-            raise click.BadParameter(f"Rate must be a number, got: {rate_str!r}")
+        except ValueError as exc:
+            msg = f"Rate must be a number, got: {rate_str!r}"
+            raise click.BadParameter(msg) from exc
 
     # Build the Crawler
     crawler = Crawler(

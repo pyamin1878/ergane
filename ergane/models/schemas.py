@@ -28,7 +28,7 @@ class CrawlConfig(BaseModel):
     proxy: str | None = Field(default=None, description="HTTP/HTTPS proxy URL")
     domain_rate_limits: dict[str, float] = Field(
         default_factory=dict,
-        description="Per-domain rate limits (req/sec). Overrides max_requests_per_second.",
+        description="Per-domain rate limits (req/sec). Overrides max_requests_per_second.",  # noqa: E501
     )
 
     # Caching
