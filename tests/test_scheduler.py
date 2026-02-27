@@ -185,3 +185,34 @@ class TestConcurrency:
         )
 
         assert await scheduler.size() == 30
+
+
+class TestAddManyBatching:
+    """add_many correctness and dedup behaviour."""
+
+    async def test_add_many_deduplicates_within_batch(self, scheduler: Scheduler):
+        """Duplicates within the same add_many call are rejected."""
+        requests = [
+            CrawlRequest(url="https://example.com/a"),
+            CrawlRequest(url="https://example.com/a"),  # duplicate
+            CrawlRequest(url="https://example.com/b"),
+        ]
+        added = await scheduler.add_many(requests)
+        assert added == 2
+        assert await scheduler.size() == 2
+
+    async def test_add_many_deduplicates_against_seen(self, scheduler: Scheduler):
+        """URLs already seen via add() are rejected by add_many."""
+        await scheduler.add(CrawlRequest(url="https://example.com/a"))
+        added = await scheduler.add_many([
+            CrawlRequest(url="https://example.com/a"),  # already seen
+            CrawlRequest(url="https://example.com/b"),
+        ])
+        assert added == 1
+        assert await scheduler.size() == 2  # original + new
+
+    async def test_add_many_returns_count(self, scheduler: Scheduler):
+        """add_many returns number of URLs actually enqueued."""
+        requests = [CrawlRequest(url=f"https://example.com/{i}") for i in range(5)]
+        added = await scheduler.add_many(requests)
+        assert added == 5

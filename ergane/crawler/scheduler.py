@@ -97,11 +97,46 @@ class Scheduler:
             return True
 
     async def add_many(self, requests: list[CrawlRequest]) -> int:
-        """Add multiple URLs, returns count of URLs actually added."""
+        """Add multiple URLs atomically under a single lock acquisition."""
         added = 0
-        for req in requests:
-            if await self.add(req):
+        notify = False
+        async with self._lock:
+            for req in requests:
+                normalized = self._normalize_url(req.url)
+                if normalized in self._seen:
+                    continue
+                if len(self._queue) >= self.config.max_queue_size:
+                    _logger.warning(
+                        "Queue full (%d), dropping URL: %s",
+                        self.config.max_queue_size,
+                        req.url,
+                    )
+                    continue
+                if len(self._seen) >= _MAX_SEEN_URLS:
+                    evict_keys = list(self._seen.keys())[:_EVICT_BATCH]
+                    domain_counts = Counter(urlparse(k).netloc for k in evict_keys)
+                    top_domains_str = ", ".join(
+                        f"{d}({c})" for d, c in domain_counts.most_common(3)
+                    )
+                    for k in evict_keys:
+                        del self._seen[k]
+                    _logger.warning(
+                        "URL seen-set capped at %d; evicted %d oldest entries "
+                        "(top domains in evicted batch: %s)",
+                        _MAX_SEEN_URLS,
+                        _EVICT_BATCH,
+                        top_domains_str,
+                    )
+                self._seen[normalized] = None
+                self._counter += 1
+                heapq.heappush(
+                    self._queue,
+                    (-req.priority, self._counter, req),
+                )
                 added += 1
+                notify = True
+        if notify:
+            self._not_empty.set()
         return added
 
     async def get(self) -> CrawlRequest:
