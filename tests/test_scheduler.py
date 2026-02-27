@@ -216,3 +216,26 @@ class TestAddManyBatching:
         requests = [CrawlRequest(url=f"https://example.com/{i}") for i in range(5)]
         added = await scheduler.add_many(requests)
         assert added == 5
+
+
+class TestWaitNotEmpty:
+    """Scheduler.wait_not_empty wakes workers when URLs arrive."""
+
+    async def test_wait_not_empty_resolves_when_url_added(self, scheduler: Scheduler):
+        """wait_not_empty() returns once a URL is enqueued."""
+        async def _add_later():
+            await asyncio.sleep(0.05)
+            await scheduler.add(CrawlRequest(url="https://example.com/wake"))
+
+        asyncio.create_task(_add_later())
+        # Should return within ~0.1s once the URL is added
+        await asyncio.wait_for(scheduler.wait_not_empty(), timeout=1.0)
+        assert await scheduler.size() == 1
+
+    async def test_wait_not_empty_immediate_if_already_has_items(
+        self, scheduler: Scheduler
+    ):
+        """wait_not_empty() returns immediately when queue is non-empty."""
+        await scheduler.add(CrawlRequest(url="https://example.com/1"))
+        # Should not block at all
+        await asyncio.wait_for(scheduler.wait_not_empty(), timeout=0.1)

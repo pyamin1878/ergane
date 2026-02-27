@@ -277,7 +277,10 @@ class Crawler:
                     # No work available; stop if page budget exhausted.
                     if self._pages_crawled >= self._max_pages:
                         break
-                await asyncio.sleep(0.1)
+                try:
+                    await asyncio.wait_for(scheduler.wait_not_empty(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    pass
                 continue
 
             # Claim a page-budget slot atomically before fetching.

@@ -176,6 +176,14 @@ class Scheduler:
         async with self._lock:
             return len(self._queue) == 0
 
+    async def wait_not_empty(self) -> None:
+        """Wait until at least one URL is in the queue.
+
+        Returns immediately if the queue already has items. Intended for
+        workers to replace ``asyncio.sleep(0.1)`` with an event-driven wait.
+        """
+        await self._not_empty.wait()
+
     def get_state(self) -> dict:
         """Export scheduler state for checkpointing.
 
